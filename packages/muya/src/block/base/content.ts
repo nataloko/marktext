@@ -529,7 +529,9 @@ class Content extends TreeNode {
             offset = this._upArrowOffset(previousContentBlock, event);
         }
         else {
-            cursorBlock = this.nextContentInContext();
+            // Resolves past the progressive-mount frontier (#4887), so moving
+            // down from the last mounted block mounts the next one.
+            cursorBlock = this.resolveNextContentInContext();
             if (!cursorBlock && this.text.length > 0) {
                 const newNodeState = { name: 'paragraph', text: '' };
                 const newNode = ScrollPage.loadBlock(newNodeState.name).create(
