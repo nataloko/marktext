@@ -14,6 +14,7 @@ const debug = logger('inlineRenderer:');
 class InlineRenderer {
     public labels: Labels = new Map();
     public renderer: Renderer;
+    private _labelsRevision = -1;
 
     constructor(public muya: Muya) {
         this.renderer = new Renderer(muya, this);
@@ -76,9 +77,17 @@ class InlineRenderer {
 
     // Reference definitions (`[ref]: url`) live in their own paragraphs, so
     // resolving `[text][ref]` needs a document-wide pass. Shared with
-    // `getTOC`, which tokenizes headings outside a rendered block.
+    // `getTOC`, which tokenizes headings outside a rendered block. Every
+    // rendered content block asks for the label map, and recollecting it reads
+    // (and clones) the WHOLE document each time — O(blocks × document) on
+    // open, which freezes large files (#4887). The map only changes when the
+    // JSON state changes, so cache it by revision.
     collectReferenceDefinitions(): Labels {
-        const state = this.muya.editor.jsonState.getState();
+        const { jsonState } = this.muya.editor;
+        if (this._labelsRevision === jsonState.revision)
+            return this.labels;
+
+        const state = jsonState.getState();
         const labels = new Map();
 
         const travel = (sts: TState[]) => {
@@ -98,6 +107,8 @@ class InlineRenderer {
 
         travel(state);
 
+        this.labels = labels;
+        this._labelsRevision = jsonState.revision;
         return labels;
     }
 
