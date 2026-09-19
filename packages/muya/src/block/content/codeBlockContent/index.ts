@@ -281,6 +281,8 @@ class CodeBlockContent extends Content {
         if (event.shiftKey) {
             let cursorBlock;
             const nextContentBlock = this.resolveNextContentInContext();
+            if (nextContentBlock === false)
+                return;
             if (nextContentBlock) {
                 cursorBlock = nextContentBlock;
             }

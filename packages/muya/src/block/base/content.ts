@@ -530,8 +530,12 @@ class Content extends TreeNode {
         }
         else {
             // Resolves past the progressive-mount frontier (#4887), so moving
-            // down from the last mounted block mounts the next one.
-            cursorBlock = this.resolveNextContentInContext();
+            // down from the last mounted block mounts the next one. False when
+            // that mount was canceled, which is not the end of the document.
+            const next = this.resolveNextContentInContext();
+            if (next === false)
+                return;
+            cursorBlock = next;
             if (!cursorBlock && this.text.length > 0) {
                 const newNodeState = { name: 'paragraph', text: '' };
                 const newNode = ScrollPage.loadBlock(newNodeState.name).create(
