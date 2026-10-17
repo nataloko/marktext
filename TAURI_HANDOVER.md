@@ -67,6 +67,12 @@ packages/desktop-tauri/
                         preferences, open, save, close, window controls, shortcuts
     shortcuts.ts        Keydown -> command id, using the desktop keybinding tables
     markdown.ts         Load and save markdown (line endings, BOM, trailing newline)
+    boot.ts, preferences.ts, files.ts, window.ts
+                        Split out of backend.ts: boot info, the window's copy of
+                        the preferences, open and save, window controls
+    appMenu.ts          The ☰ menu, built from the Electron menu templates
+    stand-ins/          Browser versions of the main process modules those
+                        templates import (see its README)
   src-tauri/
     src/main.rs         ~190 lines: builds boot info, file read/write commands,
                         opens the window
@@ -300,6 +306,32 @@ page shows "Cannot open tab"; Electron opens them as named empty documents),
 and raising windows on Wayland is untested. Note that any running build,
 debug or release, now catches launches of the other.
 
+The ☰ menu, ADR step 5 (commits `29216094`, `9bc906a3`), checked on Xvfb: the
+Electron menu templates and most menu actions run unchanged in the page; the
+modules they import that need Node or Electron resolve to `src/stand-ins`
+through a Vite plugin. The menu is rebuilt each time it opens and the
+renderer's latest menu updates are replayed onto it, so check marks and greyed
+out items follow Electron (checked: Bold after Ctrl+B, Source Code Mode with
+Typewriter and Focus greyed and Format greyed, Always on Top, Follow System
+Theme and a theme change through the reused theme actions, Open Recent from
+Rust's `recently-used-documents.json`). Quit now closes every window, each
+asking about its own unsaved documents. Not available yet, with a notice:
+Open Folder, Preferences, pandoc import and export, Check for Updates.
+Known problems:
+- Cut, Copy and Paste in the Edit menu do nothing: they are GTK's built in
+  items, which do not act on the WebKit page (the keyboard shortcuts work).
+  Planned fix: a Rust command that runs WebKitGTK's editing command, the
+  counterpart of Electron's `webContents.copy()`; Windows needs checking.
+- Only GTK's built in items show shortcut labels in the popup.
+- On Xvfb, once, a reopened menu only appeared after the next key press; not
+  reproduced in reruns. Xvfb has no window manager, so check on a desktop.
+- Once, the app closed without any log line after a long session in source
+  code mode that used menu Copy and Paste and Ctrl+C; not reproduced.
+- On Linux the popup call returns only when the menu closes (muda runs a
+  nested GTK loop, `platform_impl/gtk/mod.rs` `show_context_menu`), contrary
+  to the Tauri JS docs. That could let renderer context menus get
+  `mt::menu::closed` on dismissal too; not used yet.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -381,7 +413,7 @@ port. Unhandled channels are logged in debug builds (section 3).
 
 | Missing | Electron code / channel |
 |---|---|
-| ☰ application menu (placeholder with a few items, `backend.ts applicationMenu`) | `mt::menu::popup-application`, `src/main/menu/` |
+| ☰ menu: Cut, Copy, Paste; Open Folder, Preferences, pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
 | Sidebar, open folder, file tree | `mt::ask-for-open-project-in-sidebar`, `src/main/menu/actions/file.ts`, `src/main/filesystem/watcher.ts` |
 | Reload when a file changes on disk | `mt::update-file`, `src/main/filesystem/watcher.ts` (chokidar; Rust `notify` crate) |
@@ -390,7 +422,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
 | Find in folder | `mt::rg::*` (ripgrep; can ship as a Tauri sidecar binary) |
-| Recent files | `src/main/menu/` |
 | Folders on the command line or from a second launch; missing CLI files as named empty documents | `src/main/app/index.ts _openPathList`, `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Preferences window | renderer route `/preference`, window type `settings`, `src/main/windows/setting.ts` |
