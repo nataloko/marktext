@@ -172,12 +172,15 @@ struct LoadedText {
 // newline (src/markdown.ts).
 #[tauri::command]
 fn read_markdown_file(
+    window: tauri::WebviewWindow,
     watcher: tauri::State<'_, watch::FileWatcher>,
     path: String,
     auto_guess_encoding: bool,
 ) -> Result<LoadedText, String> {
     let bytes = std::fs::read(&path).map_err(|err| format!("{path}: {err}"))?;
-    watcher.remember(&path, &bytes);
+    if let Some(id) = windows::id_from_label(window.label()) {
+        watcher.remember(&path, id, &bytes);
+    }
     let (encoding, is_bom) = encoding::guess(&bytes, auto_guess_encoding);
     let text = encoding::decode(&bytes, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
     Ok(LoadedText { text, encoding, is_bom })
@@ -186,6 +189,7 @@ fn read_markdown_file(
 // markdown.ts writeMarkdownFile after the line endings are applied.
 #[tauri::command]
 fn write_markdown_file(
+    window: tauri::WebviewWindow,
     watcher: tauri::State<'_, watch::FileWatcher>,
     path: String,
     text: String,
@@ -194,8 +198,19 @@ fn write_markdown_file(
 ) -> Result<(), String> {
     let bytes = encoding::encode(&text, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
     write_atomic(Path::new(&path), &bytes).map_err(|err| format!("{path}: {err}"))?;
-    watcher.remember(&path, &bytes);
+    if let Some(id) = windows::id_from_label(window.label()) {
+        watcher.remember(&path, id, &bytes);
+    }
     Ok(())
+}
+
+// The path a document opens under: Electron opens a link as its target
+// (packages/desktop/src/main/filesystem/index.ts normalizeAndResolvePath),
+// which is also the folder that has to be watched.
+#[tauri::command]
+fn resolve_path(path: String) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    display(&resolve_cli_path(&cwd, &path))
 }
 
 static TEMP_FILES: AtomicU32 = AtomicU32::new(0);
@@ -374,6 +389,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_markdown_file,
             write_markdown_file,
+            resolve_path,
             path_exists,
             toggle_devtools,
             new_editor_window,

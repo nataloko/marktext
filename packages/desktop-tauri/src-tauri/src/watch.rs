@@ -3,8 +3,10 @@
 // for the sidebar). Each file's folder is watched rather than the file, so
 // editors that save by replacing the file are seen as well. A file is checked
 // once it has been quiet for a second (chokidar's awaitWriteFinish in
-// Electron) and reported only if its content differs from what MarkText last
-// read or wrote, which also keeps MarkText's own saves quiet.
+// Electron) and reported to each window whose last read or write of it had
+// different content. A window's own saves therefore stay quiet for that
+// window, while other windows with the file open still hear about them, as
+// Electron's per window ignore list does.
 //
 // Not ported yet: polling for network drives and the watcherUsePolling
 // preference.
@@ -46,20 +48,43 @@ struct FileEvent {
     mtime_ms: f64,
 }
 
+// What each window last read or wrote: a hash of the bytes, None if missing.
+type Known = HashMap<u32, Option<u64>>;
+
 pub struct FileWatcher(Mutex<State>);
 
+struct Watched {
+    // As the windows know it.
+    path: PathBuf,
+    windows: BTreeSet<u32>,
+}
+
+struct Folder {
+    path: PathBuf,
+    files: usize,
+    // False until the OS accepted the watch; the next file retries.
+    watching: bool,
+}
+
+// Maps are keyed by `key(path)`.
 #[derive(Default)]
 struct State {
     watcher: Option<RecommendedWatcher>,
-    // Watched file and the windows that have it open.
-    files: HashMap<PathBuf, BTreeSet<u32>>,
-    // Watched folder and how many watched files it holds.
-    folders: HashMap<PathBuf, usize>,
-    // What MarkText last read or wrote: a hash of the bytes, None if missing.
-    known: HashMap<PathBuf, Option<u64>>,
+    files: HashMap<PathBuf, Watched>,
+    folders: HashMap<PathBuf, Folder>,
+    known: HashMap<PathBuf, Known>,
     // Files with events, waiting to be quiet.
     pending: HashMap<PathBuf, Instant>,
     limit_reported: bool,
+}
+
+// Windows file systems ignore case, and notify reports names as stored.
+fn key(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(path.to_string_lossy().to_lowercase())
+    } else {
+        path.to_path_buf()
+    }
 }
 
 fn hash(bytes: &[u8]) -> u64 {
@@ -68,7 +93,7 @@ fn hash(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
-// What a quiet file amounts to, given what MarkText knew about it.
+// What a quiet file amounts to for a window, given what that window knew.
 fn compare(known: Option<Option<u64>>, now: Option<u64>) -> Option<Kind> {
     match (known.flatten(), now) {
         (before, now) if before == now => None,
@@ -76,6 +101,113 @@ fn compare(known: Option<Option<u64>>, now: Option<u64>) -> Option<Kind> {
         (None, Some(_)) if known.is_some() => Some(Kind::Add),
         (_, Some(_)) => Some(Kind::Change),
         (None, None) => None,
+    }
+}
+
+impl State {
+    fn remember(&mut self, path: &Path, window: u32, now: Option<u64>) {
+        self.known.entry(key(path)).or_default().insert(window, now);
+    }
+
+    // Returns the folder to start watching, if the OS is not watching it yet.
+    fn add(&mut self, path: &Path, window: u32) -> Option<PathBuf> {
+        let watched = self
+            .files
+            .entry(key(path))
+            .or_insert_with(|| Watched { path: path.to_path_buf(), windows: BTreeSet::new() });
+        if !watched.windows.insert(window) || watched.windows.len() > 1 {
+            return None;
+        }
+        let parent = path.parent()?;
+        let folder = self
+            .folders
+            .entry(key(parent))
+            .or_insert_with(|| Folder { path: parent.to_path_buf(), files: 0, watching: false });
+        folder.files += 1;
+        (!folder.watching).then(|| folder.path.clone())
+    }
+
+    fn folder_watched(&mut self, folder: &Path) {
+        if let Some(folder) = self.folders.get_mut(&key(folder)) {
+            folder.watching = true;
+        }
+    }
+
+    // Returns the folder to stop watching, if it holds no watched file any more.
+    fn drop_window(&mut self, path: &Path, window: u32) -> Option<PathBuf> {
+        let file_key = key(path);
+        if let Some(known) = self.known.get_mut(&file_key) {
+            known.remove(&window);
+        }
+        let watched = self.files.get_mut(&file_key)?;
+        if !watched.windows.remove(&window) || !watched.windows.is_empty() {
+            return None;
+        }
+        self.files.remove(&file_key);
+        self.known.remove(&file_key);
+        self.pending.remove(&file_key);
+        let folder_key = key(path.parent()?);
+        let folder = self.folders.get_mut(&folder_key)?;
+        folder.files -= 1;
+        if folder.files > 0 {
+            return None;
+        }
+        let folder = self.folders.remove(&folder_key)?;
+        folder.watching.then_some(folder.path)
+    }
+
+    fn note(&mut self, event: notify::Event) {
+        // Opening and reading a file, MarkText's own loads included, is no change.
+        if matches!(event.kind, EventKind::Access(_)) {
+            return;
+        }
+        let now = Instant::now();
+        for path in event.paths {
+            let file_key = key(&path);
+            if self.files.contains_key(&file_key) {
+                self.pending.insert(file_key, now);
+            }
+        }
+    }
+
+    // Files that have been quiet long enough, with what each window knew
+    // before the file is read again.
+    fn take_quiet(&mut self) -> Vec<(PathBuf, PathBuf, Known)> {
+        let quiet: Vec<PathBuf> = self
+            .pending
+            .iter()
+            .filter(|(_, last)| last.elapsed() >= SETTLE)
+            .map(|(file_key, _)| file_key.clone())
+            .collect();
+        quiet
+            .into_iter()
+            .filter_map(|file_key| {
+                self.pending.remove(&file_key);
+                let path = self.files.get(&file_key)?.path.clone();
+                let before = self.known.get(&file_key).cloned().unwrap_or_default();
+                Some((file_key, path, before))
+            })
+            .collect()
+    }
+
+    // The windows to tell about the file's new content, recording it as known.
+    fn settle(&mut self, file_key: &Path, now: Option<u64>, before: &Known) -> Vec<(u32, Kind)> {
+        let Some(watched) = self.files.get(file_key) else { return Vec::new() };
+        let windows: Vec<u32> = watched.windows.iter().copied().collect();
+        let known = self.known.entry(file_key.to_path_buf()).or_default();
+        windows
+            .into_iter()
+            .filter_map(|window| {
+                let current = known.get(&window).copied();
+                // The window read or wrote the file while it was being checked.
+                if current != before.get(&window).copied() {
+                    return None;
+                }
+                let kind = compare(current, now)?;
+                known.insert(window, now);
+                Some((window, kind))
+            })
+            .collect()
     }
 }
 
@@ -97,26 +229,20 @@ impl FileWatcher {
         self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    // Called with the bytes MarkText just read from or wrote to `path`.
-    pub fn remember(&self, path: &str, bytes: &[u8]) {
-        self.lock().known.insert(PathBuf::from(path), Some(hash(bytes)));
+    // Called with the bytes a window just read from or wrote to `path`.
+    pub fn remember(&self, path: &str, window: u32, bytes: &[u8]) {
+        self.lock().remember(Path::new(path), window, Some(hash(bytes)));
     }
 
     // Returns a message for the user when the OS refuses another watch.
     pub fn watch(&self, path: &str, window: u32) -> Option<String> {
-        let path = PathBuf::from(path);
         let mut state = self.lock();
-        let windows = state.files.entry(path.clone()).or_default();
-        let first = windows.is_empty();
-        windows.insert(window);
-        let folder = path.parent().filter(|_| first)?.to_path_buf();
-        let count = state.folders.entry(folder.clone()).or_insert(0);
-        *count += 1;
-        if *count > 1 {
-            return None;
-        }
-        let result = state.watcher.as_mut()?.watch(&folder, RecursiveMode::NonRecursive);
-        match result {
+        let folder = state.add(Path::new(path), window)?;
+        match state.watcher.as_mut()?.watch(&folder, RecursiveMode::NonRecursive) {
+            Ok(()) => {
+                state.folder_watched(&folder);
+                None
+            }
             Err(err) if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) && !state.limit_reported => {
                 state.limit_reported = true;
                 Some(err.to_string())
@@ -125,69 +251,31 @@ impl FileWatcher {
                 eprintln!("[watch] {}: {err}", folder.display());
                 None
             }
-            Ok(()) => None,
         }
     }
 
     pub fn unwatch(&self, path: &str, window: u32) {
         let mut state = self.lock();
-        state.drop_window(Path::new(path), window);
+        if let Some(folder) = state.drop_window(Path::new(path), window) {
+            if let Some(watcher) = state.watcher.as_mut() {
+                let _ = watcher.unwatch(&folder);
+            }
+        }
     }
 
     pub fn unwatch_window(&self, window: u32) {
         let mut state = self.lock();
-        let paths: Vec<PathBuf> = state.files.keys().cloned().collect();
+        let paths: Vec<PathBuf> = state.files.values().map(|watched| watched.path.clone()).collect();
         for path in paths {
-            state.drop_window(&path, window);
-        }
-    }
-}
-
-impl State {
-    fn drop_window(&mut self, path: &Path, window: u32) {
-        let Some(windows) = self.files.get_mut(path) else { return };
-        windows.remove(&window);
-        if !windows.is_empty() {
-            return;
-        }
-        self.files.remove(path);
-        self.known.remove(path);
-        self.pending.remove(path);
-        let Some(folder) = path.parent() else { return };
-        let Some(count) = self.folders.get_mut(folder) else { return };
-        *count -= 1;
-        if *count == 0 {
-            self.folders.remove(folder);
-            if let Some(watcher) = self.watcher.as_mut() {
-                let _ = watcher.unwatch(folder);
+            if let Some(folder) = state.drop_window(&path, window) {
+                if let Some(watcher) = state.watcher.as_mut() {
+                    let _ = watcher.unwatch(&folder);
+                }
             }
         }
-    }
-
-    fn note(&mut self, event: notify::Event) {
-        // Opening and reading a file, MarkText's own loads included, is no change.
-        if matches!(event.kind, EventKind::Access(_)) {
-            return;
+        for known in state.known.values_mut() {
+            known.remove(&window);
         }
-        let now = Instant::now();
-        for path in event.paths {
-            if self.files.contains_key(&path) {
-                self.pending.insert(path, now);
-            }
-        }
-    }
-
-    fn take_quiet(&mut self) -> Vec<PathBuf> {
-        let quiet: Vec<PathBuf> = self
-            .pending
-            .iter()
-            .filter(|(_, last)| last.elapsed() >= SETTLE)
-            .map(|(path, _)| path.clone())
-            .collect();
-        for path in &quiet {
-            self.pending.remove(path);
-        }
-        quiet
     }
 }
 
@@ -211,36 +299,25 @@ fn run(app: AppHandle, events: Receiver<notify::Result<notify::Event>>) {
             }
             state.take_quiet()
         };
-        for path in quiet {
-            check(&app, path);
+        for (file_key, path, before) in quiet {
+            check(&app, &file_key, &path, &before);
         }
     }
 }
 
-fn check(app: &AppHandle, path: PathBuf) {
+fn check(app: &AppHandle, file_key: &Path, path: &Path, before: &Known) {
     // Read outside the lock; a file that cannot be read counts as missing.
-    let bytes = std::fs::read(&path).ok();
-    let mtime_ms = std::fs::metadata(&path)
+    let now = std::fs::read(path).ok().as_deref().map(hash);
+    let mtime_ms = std::fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map_or(0.0, |since| since.as_millis() as f64);
-
-    let watcher = app.state::<FileWatcher>();
-    let (change, windows) = {
-        let mut state = watcher.lock();
-        let Some(windows) = state.files.get(&path).cloned() else { return };
-        let now = bytes.as_deref().map(hash);
-        let change = compare(state.known.get(&path).copied(), now);
-        if change.is_some() {
-            state.known.insert(path.clone(), now);
-        }
-        (change, windows)
-    };
-    let Some(kind) = change else { return };
-    let event = FileEvent { pathname: path.to_string_lossy().into_owned(), kind, mtime_ms };
-    for window in windows {
-        if let Err(err) = app.emit_to(label(window), FILE_EVENT, event.clone()) {
+    let reports = app.state::<FileWatcher>().lock().settle(file_key, now, before);
+    let pathname = path.to_string_lossy().into_owned();
+    for (window, kind) in reports {
+        let event = FileEvent { pathname: pathname.clone(), kind, mtime_ms };
+        if let Err(err) = app.emit_to(label(window), FILE_EVENT, event) {
             eprintln!("[watch] {err}");
         }
     }
@@ -259,5 +336,58 @@ mod tests {
         assert_eq!(compare(Some(None), None), None);
         assert_eq!(compare(None, Some(1)), Some(Kind::Change));
         assert_eq!(compare(None, None), None);
+    }
+
+    #[test]
+    fn folders_are_watched_while_they_hold_open_files() {
+        let mut state = State::default();
+        let folder = PathBuf::from("/notes");
+        assert_eq!(state.add(Path::new("/notes/a.md"), 1), Some(folder.clone()));
+        state.folder_watched(&folder);
+        assert_eq!(state.add(Path::new("/notes/b.md"), 1), None);
+        assert_eq!(state.add(Path::new("/notes/a.md"), 2), None);
+        assert_eq!(state.drop_window(Path::new("/notes/a.md"), 1), None);
+        assert_eq!(state.drop_window(Path::new("/notes/a.md"), 2), None);
+        assert_eq!(state.drop_window(Path::new("/notes/b.md"), 1), Some(folder));
+        assert!(state.files.is_empty() && state.folders.is_empty());
+    }
+
+    #[test]
+    fn a_refused_folder_is_retried_by_the_next_file() {
+        let mut state = State::default();
+        let folder = PathBuf::from("/notes");
+        assert_eq!(state.add(Path::new("/notes/a.md"), 1), Some(folder.clone()));
+        assert_eq!(state.add(Path::new("/notes/b.md"), 1), Some(folder.clone()));
+        state.folder_watched(&folder);
+        assert_eq!(state.add(Path::new("/notes/c.md"), 1), None);
+    }
+
+    #[test]
+    fn a_save_is_quiet_for_its_window_but_reported_to_others() {
+        let mut state = State::default();
+        let file = Path::new("/notes/a.md");
+        state.add(file, 1);
+        state.add(file, 2);
+        state.remember(file, 1, Some(10));
+        state.remember(file, 2, Some(10));
+        // Window 1 saves new content.
+        state.remember(file, 1, Some(20));
+        let before = state.known[&key(file)].clone();
+        assert_eq!(state.settle(&key(file), Some(20), &before), vec![(2, Kind::Change)]);
+        let before = state.known[&key(file)].clone();
+        assert_eq!(state.settle(&key(file), Some(20), &before), vec![]);
+    }
+
+    #[test]
+    fn a_read_during_the_check_wins() {
+        let mut state = State::default();
+        let file = Path::new("/notes/a.md");
+        state.add(file, 1);
+        state.remember(file, 1, Some(10));
+        let before = state.known[&key(file)].clone();
+        // The window loads the file again while it is being checked.
+        state.remember(file, 1, Some(30));
+        assert_eq!(state.settle(&key(file), Some(20), &before), vec![]);
+        assert_eq!(state.known[&key(file)][&1], Some(30));
     }
 }

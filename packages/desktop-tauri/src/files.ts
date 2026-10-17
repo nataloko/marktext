@@ -37,7 +37,8 @@ const loadPreferences = (): LoadPreferences => ({
 })
 
 // packages/desktop/src/main/windows/editor.ts openTabsFromPaths and _doOpenTab.
-export const openTab = async(pathname: string, selected = true): Promise<void> => {
+export const openTab = async(requested: string, selected = true): Promise<void> => {
+  const pathname = await invoke<string>('resolve_path', { path: requested })
   if (!(await invoke<boolean>('window_add_file', { path: pathname }))) {
     emitToRenderer('mt::switch-tab-by-file_path', pathname, {})
     return
