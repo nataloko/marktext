@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
@@ -76,6 +76,32 @@ fn is_markdown(path: &Path) -> bool {
         .is_some_and(|ext| MARKDOWN_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
 }
 
+// Node's path.resolve: absolute, without "." and ".." parts, links kept.
+fn resolve_lexically(base: &Path, path: &Path) -> PathBuf {
+    let mut resolved = PathBuf::new();
+    for component in base.join(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            other => resolved.push(other),
+        }
+    }
+    resolved
+}
+
+// packages/desktop/src/main/filesystem/index.ts normalizeAndResolvePath: a
+// link is replaced by its target; other paths keep the folders they were
+// given through, so they match what the open dialog returns.
+fn resolve_cli_path(cwd: &Path, arg: &str) -> PathBuf {
+    let path = resolve_lexically(cwd, Path::new(arg));
+    match std::fs::read_link(&path) {
+        Ok(target) => resolve_lexically(path.parent().unwrap_or(&path), &target),
+        Err(_) => path,
+    }
+}
+
 // Markdown files named on a command line, resolved against `cwd`
 // (packages/desktop/src/main/filesystem/markdown.ts normalizeCliMarkdownPath).
 // Files that do not exist yet are passed on when their folder exists; folders
@@ -83,13 +109,12 @@ fn is_markdown(path: &Path) -> bool {
 fn markdown_files(cwd: &Path, args: &[String]) -> Vec<String> {
     args.iter()
         .filter(|arg| !arg.starts_with('-'))
-        .filter_map(|arg| {
-            let path = cwd.join(arg);
-            match std::fs::canonicalize(&path) {
-                Ok(real) => (real.is_file() && is_markdown(&real)).then(|| display(&real)),
-                Err(_) => (is_markdown(&path) && path.parent().is_some_and(Path::is_dir)).then(|| display(&path)),
-            }
+        .map(|arg| resolve_cli_path(cwd, arg))
+        .filter(|path| {
+            is_markdown(path)
+                && (path.is_file() || (!path.exists() && path.parent().is_some_and(Path::is_dir)))
         })
+        .map(|path| display(&path))
         .collect()
 }
 
@@ -265,22 +290,38 @@ fn main() {
 mod tests {
     use super::*;
 
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mt-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| arg.to_string()).collect()
+    }
+
     #[test]
     fn markdown_files_keeps_markdown_and_new_files() {
-        let dir = std::env::temp_dir().join(format!("mt-cli-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_dir("filter");
         std::fs::create_dir_all(dir.join("folder")).unwrap();
         std::fs::write(dir.join("notes.MD"), "").unwrap();
         std::fs::write(dir.join("image.png"), "").unwrap();
-        let real = std::fs::canonicalize(&dir).unwrap();
 
-        let args: Vec<String> = ["--new-window", "notes.MD", "image.png", "folder", "new.md", "gone/new.md"]
-            .iter()
-            .map(|arg| arg.to_string())
-            .collect();
+        let given = args(&["--new-window", "notes.MD", "image.png", "folder", "new.md", "gone/new.md", "folder/../x.md"]);
         assert_eq!(
-            markdown_files(&dir, &args),
-            vec![display(&real.join("notes.MD")), display(&dir.join("new.md"))]
+            markdown_files(&dir, &given),
+            vec![display(&dir.join("notes.MD")), display(&dir.join("new.md")), display(&dir.join("x.md"))]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_resolves_to_its_target() {
+        let dir = temp_dir("link");
+        std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
+        std::fs::write(dir.join("elsewhere/target.md"), "").unwrap();
+        std::os::unix::fs::symlink("elsewhere/target.md", dir.join("link.md")).unwrap();
+        assert_eq!(markdown_files(&dir, &args(&["link.md"])), vec![display(&dir.join("elsewhere/target.md"))]);
     }
 }
