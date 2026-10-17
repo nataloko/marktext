@@ -198,12 +198,15 @@ fn write_markdown_file(
     Ok(())
 }
 
+static TEMP_FILES: AtomicU32 = AtomicU32::new(0);
+
 // Writes beside the target and renames over it, so a failed write never
 // leaves a truncated file behind. As write-file-atomic does for Electron, a
 // link is written through to its target and the target keeps its permissions.
 fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
     let target = match std::fs::symlink_metadata(target) {
-        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(target)?,
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(target)
+            .map_err(|err| std::io::Error::new(err.kind(), format!("the link points to a missing file ({err})")))?,
         _ => target.to_path_buf(),
     };
     let name = target
@@ -212,13 +215,31 @@ fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let temp = target.with_file_name(format!(".{}.marktext-tmp", name.to_string_lossy()));
+    let temp = target.with_file_name(format!(
+        ".{}.{}-{}.marktext-tmp",
+        name.to_string_lossy(),
+        std::process::id(),
+        TEMP_FILES.fetch_add(1, Ordering::Relaxed)
+    ));
+    let permissions = std::fs::metadata(&target).ok().map(|meta| meta.permissions());
     let written = (|| {
-        let mut file = std::fs::File::create(&temp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        // The temp file has the target's mode from the start, so a private
+        // note is never readable by others while it is written.
+        #[cfg(unix)]
+        if let Some(permissions) = &permissions {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(permissions.mode());
+        }
+        let mut file = options.open(&temp)?;
         file.write_all(contents)?;
         file.sync_all()?;
-        if let Ok(meta) = std::fs::metadata(&target) {
-            std::fs::set_permissions(&temp, meta.permissions())?;
+        drop(file);
+        // The umask may have cleared bits that the target had.
+        #[cfg(unix)]
+        if let Some(permissions) = permissions {
+            std::fs::set_permissions(&temp, permissions)?;
         }
         rename_with_retry(&temp, &target)
     })();
@@ -228,14 +249,19 @@ fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
     written
 }
 
-// Windows can hold a file for a moment after a watcher looked at it, notably
-// on network drives (packages/desktop/src/main/filesystem/index.ts writeFile, #5322).
+fn is_sharing_error(err: &std::io::Error) -> bool {
+    matches!(err.kind(), ErrorKind::PermissionDenied | ErrorKind::ResourceBusy)
+        // Windows ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION, libuv's EBUSY.
+        || (cfg!(windows) && matches!(err.raw_os_error(), Some(32 | 33)))
+}
+
+// Windows can hold a file for a moment after a watcher, a virus scanner or a
+// sync client looked at it, notably on network drives
+// (packages/desktop/src/main/filesystem/index.ts writeFile, #5322).
 fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     for delay in [50, 75, 50] {
         match std::fs::rename(from, to) {
-            Err(err) if matches!(err.kind(), ErrorKind::PermissionDenied | ErrorKind::ResourceBusy) => {
-                std::thread::sleep(Duration::from_millis(delay))
-            }
+            Err(err) if is_sharing_error(&err) => std::thread::sleep(Duration::from_millis(delay)),
             result => return result,
         }
     }
@@ -416,6 +442,45 @@ mod tests {
             markdown_files(&dir, &given),
             vec![display(&dir.join("notes.MD")), display(&dir.join("new.md")), display(&dir.join("x.md"))]
         );
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_nothing_behind() {
+        let dir = temp_dir("write");
+        let file = dir.join("note.md");
+        write_atomic(&file, b"one").unwrap();
+        write_atomic(&file, b"two").unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"two");
+        assert_eq!(files_in(&dir), vec!["note.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_keeps_permissions_and_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("write-unix");
+        let file = dir.join("private.md");
+        std::fs::write(&file, "old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomic(&file, b"new").unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+
+        std::os::unix::fs::symlink("private.md", dir.join("link.md")).unwrap();
+        write_atomic(&dir.join("link.md"), b"through the link").unwrap();
+        assert!(std::fs::symlink_metadata(dir.join("link.md")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&file).unwrap(), b"through the link");
+
+        std::os::unix::fs::symlink("gone.md", dir.join("broken.md")).unwrap();
+        let err = write_atomic(&dir.join("broken.md"), b"x").unwrap_err();
+        assert!(err.to_string().contains("missing file"), "{err}");
+        assert_eq!(files_in(&dir), vec!["broken.md", "link.md", "private.md"]);
     }
 
     #[cfg(unix)]
