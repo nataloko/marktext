@@ -33,6 +33,7 @@ export const openTab = async(pathname: string, selected = true): Promise<void> =
   try {
     const document = await loadMarkdownFile(pathname, {
       preferredEol: preferredEol(),
+      autoGuessEncoding: preferences.autoGuessEncoding !== false,
       trimTrailingNewline: Number(preferences.trimTrailingNewline ?? 2),
       autoNormalizeLineEndings: !!preferences.autoNormalizeLineEndings
     })
@@ -88,7 +89,8 @@ export const saveTab = async(
       filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
     })
     if (!chosen) return
-    target = chosen
+    // file.ts handleResponseForSave: a name without an extension gets ".md".
+    target = /\.[^\\/.]+$/.test(chosen) ? chosen : `${chosen}.md`
   }
 
   try {

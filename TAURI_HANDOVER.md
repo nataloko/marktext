@@ -128,8 +128,12 @@ packages/desktop-tauri/
   `.title-bar` (double click toggles maximise).
 - **Tauri's native drag and drop handler is disabled** so HTML drop events reach
   the editor. Side effect: dropped files have no filesystem path yet.
-- **Non UTF8 files are refused**, not guessed. `read_text_file` errors on invalid
-  UTF8 so a save can never re-encode a file wrongly. Electron uses ced + iconv.
+- **Encodings never lose data** (`src-tauri/src/encoding.rs`, since the step 6
+  work). Detection follows Electron (BOM, then valid UTF-8, then a guess, with
+  `chardetng` in place of ced), but where iconv-lite silently replaces, the trial
+  refuses: a file whose bytes do not fit the detected or default encoding is not
+  opened, and a character the file's encoding cannot hold makes the save fail
+  with a message, so a round trip never damages a file.
 - **Minify is off**, matching electron-vite's renderer default. It also avoids a
   build failure: `components/titleBar/index.vue` has an invalid
   `var(sideBarTitleColor)` (missing `--`) that the CSS minifier rejects. That's an
@@ -333,6 +337,15 @@ Known problems:
   to the Tauri JS docs. That could let renderer context menus get
   `mt::menu::closed` on dismissal too; not used yet.
 
+Encodings, ADR step 6 part 1, checked on Xvfb: GBK, Windows-1252 and UTF-16
+with BOM files open with the right text and save back in the same encoding
+(BOM kept); typing Ω into the Windows-1252 file makes the save fail with
+'"Ω" cannot be saved in cp1252' and leaves the file untouched. Saving also
+flushes to disk, keeps the file's permissions, writes through a link to its
+target and retries briefly when Windows holds the file; a name typed without
+an extension in the save dialog gets ".md". Not done: owner preservation,
+UTF-32 BOM detection (as in Electron), files that do not exist yet.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -418,7 +431,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
 | Sidebar, open folder, file tree | `mt::ask-for-open-project-in-sidebar`, `src/main/menu/actions/file.ts`, `src/main/filesystem/watcher.ts` |
 | Reload when a file changes on disk | `mt::update-file`, `src/main/filesystem/watcher.ts` (chokidar; Rust `notify` crate) |
-| Encodings other than UTF8 | `src/main/filesystem/encoding.ts`, `markdown.ts` (ced + iconv; Rust `chardetng` + `encoding_rs`) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |

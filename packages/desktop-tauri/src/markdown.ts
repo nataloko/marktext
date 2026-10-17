@@ -1,7 +1,7 @@
-// Trial versions of loadMarkdownFile / writeMarkdownFile from
-// packages/desktop/src/main/filesystem/markdown.ts. UTF-8 only: the Rust side
-// refuses other encodings rather than guessing, so a save can never re-encode
-// a file wrongly.
+// loadMarkdownFile / writeMarkdownFile from
+// packages/desktop/src/main/filesystem/markdown.ts. Rust reads and writes the
+// bytes and handles the encoding (src-tauri/src/encoding.rs); this part does
+// the line endings and the trailing newline.
 
 import { invoke } from '@tauri-apps/api/core'
 
@@ -15,15 +15,21 @@ export interface MarkdownOptions {
 
 export interface LoadPreferences {
   preferredEol: LineEnding
+  autoGuessEncoding: boolean
   trimTrailingNewline: number
   autoNormalizeLineEndings: boolean
+}
+
+interface LoadedText {
+  text: string
+  encoding: string
+  isBom: boolean
 }
 
 // Same expressions as packages/desktop/src/main/config.ts.
 const LINE_ENDING_REG = /(?:\r\n|\n)/g
 const LF_LINE_ENDING_REG = /(?:[^\r]\n)|(?:^\n$)/
 const CRLF_LINE_ENDING_REG = /\r\n/
-const BOM = '﻿'
 
 const convertLineEndings = (text: string, lineEnding: LineEnding): string =>
   text.replace(LINE_ENDING_REG, lineEnding === 'crlf' ? '\r\n' : '\n')
@@ -31,10 +37,11 @@ const convertLineEndings = (text: string, lineEnding: LineEnding): string =>
 const basename = (pathname: string): string => pathname.split(/[\\/]/).pop() ?? pathname
 
 export const loadMarkdownFile = async(pathname: string, prefs: LoadPreferences) => {
-  let markdown = await invoke<string>('read_text_file', { path: pathname })
-
-  const isBom = markdown.startsWith(BOM)
-  if (isBom) markdown = markdown.slice(1)
+  const loaded = await invoke<LoadedText>('read_markdown_file', {
+    path: pathname,
+    autoGuessEncoding: prefs.autoGuessEncoding
+  })
+  let markdown = loaded.text
 
   const isLf = LF_LINE_ENDING_REG.test(markdown)
   const isCrlf = CRLF_LINE_ENDING_REG.test(markdown)
@@ -65,7 +72,7 @@ export const loadMarkdownFile = async(pathname: string, prefs: LoadPreferences) 
     markdown,
     filename: basename(pathname),
     pathname,
-    encoding: { encoding: 'utf8', isBom },
+    encoding: { encoding: loaded.encoding, isBom: loaded.isBom },
     lineEnding,
     adjustLineEndingOnSave,
     trimTrailingNewline,
@@ -79,11 +86,8 @@ export const writeMarkdownFile = async(
   options: MarkdownOptions
 ): Promise<void> => {
   const { encoding, isBom } = options.encoding
-  if (!/^utf-?8$/i.test(encoding)) {
-    throw new Error(`Saving as "${encoding}" is not supported in the Tauri trial.`)
-  }
   if (options.adjustLineEndingOnSave) {
     content = convertLineEndings(content, options.lineEnding)
   }
-  await invoke('write_text_file', { path: pathname, contents: isBom ? BOM + content : content })
+  await invoke('write_markdown_file', { path: pathname, text: content, encoding, isBom })
 }

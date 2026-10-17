@@ -1,12 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+mod encoding;
 mod preferences;
 mod recent;
 mod windows;
@@ -155,32 +158,74 @@ fn boot_info(app: &AppHandle, user_data: &Path, window_id: u32, open_files: Vec<
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadedText {
+    text: String,
+    encoding: String,
+    is_bom: bool,
+}
+
+// packages/desktop/src/main/filesystem/markdown.ts loadMarkdownFile: read,
+// detect the encoding, decode. The page handles line endings and the trailing
+// newline (src/markdown.ts).
 #[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
+fn read_markdown_file(path: String, auto_guess_encoding: bool) -> Result<LoadedText, String> {
     let bytes = std::fs::read(&path).map_err(|err| format!("{path}: {err}"))?;
-    String::from_utf8(bytes)
-        .map_err(|_| format!("{path} is not UTF-8. Other encodings are not supported in the Tauri trial."))
+    let (encoding, is_bom) = encoding::guess(&bytes, auto_guess_encoding);
+    let text = encoding::decode(&bytes, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
+    Ok(LoadedText { text, encoding, is_bom })
+}
+
+// markdown.ts writeMarkdownFile after the line endings are applied.
+#[tauri::command]
+fn write_markdown_file(path: String, text: String, encoding: String, is_bom: bool) -> Result<(), String> {
+    let bytes = encoding::encode(&text, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
+    write_atomic(Path::new(&path), &bytes).map_err(|err| format!("{path}: {err}"))
 }
 
 // Writes beside the target and renames over it, so a failed write never
-// leaves a truncated file behind.
+// leaves a truncated file behind. As write-file-atomic does for Electron, a
+// link is written through to its target and the target keeps its permissions.
 fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let target = match std::fs::symlink_metadata(target) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(target)?,
+        _ => target.to_path_buf(),
+    };
     let name = target
         .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file path"))?;
+        .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "not a file path"))?;
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let temp = target.with_file_name(format!(".{}.marktext-tmp", name.to_string_lossy()));
-    std::fs::write(&temp, contents)?;
-    std::fs::rename(&temp, target).inspect_err(|_| {
+    let written = (|| {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        if let Ok(meta) = std::fs::metadata(&target) {
+            std::fs::set_permissions(&temp, meta.permissions())?;
+        }
+        rename_with_retry(&temp, &target)
+    })();
+    if written.is_err() {
         let _ = std::fs::remove_file(&temp);
-    })
+    }
+    written
 }
 
-#[tauri::command]
-fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    write_atomic(Path::new(&path), contents.as_bytes()).map_err(|err| format!("{path}: {err}"))
+// Windows can hold a file for a moment after a watcher looked at it, notably
+// on network drives (packages/desktop/src/main/filesystem/index.ts writeFile, #5322).
+fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    for delay in [50, 75, 50] {
+        match std::fs::rename(from, to) {
+            Err(err) if matches!(err.kind(), ErrorKind::PermissionDenied | ErrorKind::ResourceBusy) => {
+                std::thread::sleep(Duration::from_millis(delay))
+            }
+            result => return result,
+        }
+    }
+    std::fs::rename(from, to)
 }
 
 #[tauri::command]
@@ -287,8 +332,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            read_text_file,
-            write_text_file,
+            read_markdown_file,
+            write_markdown_file,
             path_exists,
             toggle_devtools,
             new_editor_window,
