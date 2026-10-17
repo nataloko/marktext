@@ -2,8 +2,8 @@
   "extends": "../desktop/tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["src/**/*.ts", "vite.config.ts"],
+  "include": ["src/**/*.ts", "vite.config.ts", "../desktop/src/types/**/*.d.ts"],
   "exclude": ["src/entry.ts"]
 }

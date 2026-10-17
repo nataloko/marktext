@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 mod preferences;
+mod recent;
 mod windows;
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
@@ -238,6 +239,15 @@ pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> ta
     Ok(())
 }
 
+// Electron's app.quit: every window gets a close request, so each one asks
+// about its own unsaved documents.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    for window in app.webview_windows().values() {
+        let _ = window.close();
+    }
+}
+
 // Async because building a window inside a synchronous command deadlocks on Windows.
 #[tauri::command]
 async fn new_editor_window(app: AppHandle, files: Vec<String>) -> Result<(), String> {
@@ -258,12 +268,16 @@ fn main() {
             path_exists,
             toggle_devtools,
             new_editor_window,
+            quit_app,
             preferences::get_preferences,
             preferences::set_preferences,
             windows::window_add_file,
             windows::window_change_file,
             windows::window_remove_file,
-            windows::window_ready
+            windows::window_ready,
+            recent::recent_files,
+            recent::add_recent_file,
+            recent::clear_recent_files
         ])
         .manage(windows::Windows::default())
         .on_window_event(|window, event| {
@@ -277,6 +291,7 @@ fn main() {
         .setup(|app| {
             let user_data = app.path().app_data_dir()?;
             app.manage(preferences::Preferences::load(user_data.join("preferences.json")));
+            app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
             let cwd = std::env::current_dir().unwrap_or_default();
             let args: Vec<String> = std::env::args().skip(1).collect();
             open_editor_window(app.handle(), markdown_files(&cwd, &args))?;

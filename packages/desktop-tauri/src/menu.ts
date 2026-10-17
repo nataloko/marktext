@@ -1,6 +1,6 @@
-// Native popup menus through Tauri's JS menu API, standing in for
-// packages/desktop/src/main/ipc/window.ts (mt::menu::popup and
-// mt::menu::popup-application).
+// Native popup menus through Tauri's JS menu API. `popupMenu` stands in for
+// packages/desktop/src/main/ipc/window.ts mt::menu::popup (the renderer's own
+// context menus); src/appMenu.ts builds the ☰ menu with `showPopup`.
 
 import { LogicalPosition } from '@tauri-apps/api/dpi'
 import {
@@ -12,7 +12,11 @@ import {
 } from '@tauri-apps/api/menu'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 
-type ItemOptions = MenuItemOptions | CheckMenuItemOptions | PredefinedMenuItemOptions | SubmenuOptions
+export type ItemOptions =
+  | MenuItemOptions
+  | CheckMenuItemOptions
+  | PredefinedMenuItemOptions
+  | SubmenuOptions
 
 // Tauri routes clicks by item id across the whole app, but each window
 // numbers its renderer menu items from 1, so ids get a per window prefix.
@@ -54,14 +58,16 @@ const toItems = (
 
 let shown: Menu | null = null
 
-export const popupMenu = async(
+export const showPopup = async(items: ItemOptions[], position?: MenuPopupPosition): Promise<void> => {
+  // The previous popup is gone once a new one opens; release it.
+  await shown?.close()
+  shown = await Menu.new({ items })
+  await shown.popup(position ? new LogicalPosition(position.x, position.y) : undefined)
+}
+
+export const popupMenu = (
   template: MenuTemplate,
   position: MenuPopupPosition | undefined,
   prefix: string,
   onClick: (id: string) => void
-): Promise<void> => {
-  // The previous popup is gone once a new one opens; release it.
-  await shown?.close()
-  shown = await Menu.new({ items: toItems(template, prefix, onClick) })
-  await shown.popup(position ? new LogicalPosition(position.x, position.y) : undefined)
-}
+): Promise<void> => showPopup(toItems(template, prefix, onClick), position)

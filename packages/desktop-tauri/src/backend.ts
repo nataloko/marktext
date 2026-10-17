@@ -1,87 +1,39 @@
-// Answers the messages the renderer normally sends to Electron's main process,
-// for a single editor window: boot, preferences, open, save, close and window
-// controls. Channel names and payloads follow packages/desktop/src/main; the
-// file:line notes point at the Electron code each handler stands in for.
-// Anything not handled here is logged once by ./electron.
+// Answers the messages the renderer normally sends to Electron's main process
+// for this window. Channel names and payloads follow packages/desktop/src/main;
+// the file:line notes point at the Electron code each handler stands in for.
+// Preferences, files, window controls and the ☰ menu live in their own modules.
+// Anything not handled is logged once by ./electron.
 
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { ask } from '@tauri-apps/plugin-dialog'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
-import { createPlatformPath } from 'common/filesystem/platformPath'
-import type { BootInfo } from '@shared/types/ipc'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
+import { registerMenuHandlers } from './appMenu'
+import { appWindow, boot, isWindows } from './boot'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
-import { loadMarkdownFile, writeMarkdownFile, type MarkdownOptions } from './markdown'
+import { openTab, openTabs, saveTab, showOpenDialog, type SaveRequest } from './files'
 import { popupMenu } from './menu'
+import {
+  forRenderer,
+  listenForPreferences,
+  loadPreferences,
+  preferences,
+  preferredEol,
+  setPreferences
+} from './preferences'
 import { defaultKeybindings, installShortcuts } from './shortcuts'
+import {
+  closeWindow,
+  fullscreen,
+  installWindowEvents,
+  newWindow,
+  quitApp,
+  setFullscreen
+} from './window'
 
-interface TauriBootInfo extends BootInfo {
-  windowId: number
-  // Absolute paths to open in this window.
-  openFiles: string[]
-}
-
-declare global {
-  interface Window {
-    __MT_BOOT__: TauriBootInfo
-  }
-}
-
-const boot = window.__MT_BOOT__
-const isWindows = boot.platform === 'win32'
-const path = createPlatformPath(isWindows)
-const appWindow = getCurrentWindow()
 const keybindings = defaultKeybindings(boot.platform)
 
-const MARKDOWN_EXTENSIONS = [
-  'md',
-  'markdown',
-  'mdown',
-  'mkdn',
-  'mkd',
-  'mdwn',
-  'mdtxt',
-  'mdtext',
-  'mdx',
-  'txt'
-]
-
 const translations = import.meta.glob('../../desktop/static/locales/*.json', { import: 'default' })
-
-// ---- preferences -----------------------------------------------------------
-
-// The store lives in Rust (src-tauri/src/preferences.rs); this is the
-// window's copy, kept current by the `mt::user-preference` broadcast.
-type Preferences = Record<string, unknown>
-
-let preferences: Preferences = {}
-
-const loadPreferences = async(): Promise<void> => {
-  // Only used on first run, to pick the theme (main/preferences/index.ts init).
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  preferences = await invoke<Preferences>('get_preferences', { prefersDark })
-}
-
-const setPreferences = (changes: Preferences): Promise<unknown> =>
-  invoke('set_preferences', { changes })
-
-// What the renderer sees, for the full set or a change. Session restore is not
-// implemented in the trial, so "restoreAll" would let the window close without
-// asking about unsaved tabs (store/editor.ts LISTEN_FOR_CLOSE).
-const forRenderer = (prefs: Preferences): Preferences => {
-  const shown = { ...prefs }
-  if (shown.startUpAction === 'restoreAll') shown.startUpAction = 'blank'
-  delete shown.titleBarStyle
-  return shown
-}
-
-const preferredEol = (): 'lf' | 'crlf' => {
-  const endOfLine = preferences.endOfLine
-  if (endOfLine === 'lf') return 'lf'
-  return endOfLine === 'crlf' || isWindows ? 'crlf' : 'lf'
-}
 
 // The renderer reads its first settings from the page URL
 // (packages/desktop/src/main/windows/base.ts _buildUrlWithSettings).
@@ -98,153 +50,6 @@ const setWindowUrlParams = (): void => {
     tbs: 'custom'
   })
   history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`)
-}
-
-// ---- files -----------------------------------------------------------------
-
-// Rust keeps each window's open files (src-tauri/src/windows.rs), as
-// packages/desktop/src/main/windows/editor.ts openTabsFromPaths does.
-const openTab = async(pathname: string, selected = true): Promise<void> => {
-  if (!(await invoke<boolean>('window_add_file', { path: pathname }))) {
-    emitToRenderer('mt::switch-tab-by-file_path', pathname, {})
-    return
-  }
-  try {
-    const document = await loadMarkdownFile(pathname, {
-      preferredEol: preferredEol(),
-      trimTrailingNewline: Number(preferences.trimTrailingNewline ?? 2),
-      autoNormalizeLineEndings: !!preferences.autoNormalizeLineEndings
-    })
-    emitToRenderer('mt::open-new-tab', document, {}, selected)
-  } catch (err) {
-    void invoke('window_remove_file', { path: pathname })
-    emitToRenderer('mt::show-notification', {
-      title: 'Cannot open tab',
-      type: 'error',
-      message: String(err)
-    })
-  }
-}
-
-const openTabs = async(paths: string[]): Promise<void> => {
-  for (const [index, pathname] of paths.entries()) {
-    await openTab(pathname, index === 0)
-  }
-}
-
-const showOpenDialog = async(): Promise<void> => {
-  const picked = await openDialog({
-    multiple: true,
-    filters: [{ name: 'Markdown', extensions: MARKDOWN_EXTENSIONS }]
-  })
-  await openTabs(picked === null ? [] : Array.isArray(picked) ? picked : [picked])
-}
-
-// Arguments of mt::response-file-save and mt::response-file-save-as.
-type SaveRequest = [
-  id: string,
-  filename: string,
-  pathname: string,
-  markdown: string,
-  options: MarkdownOptions,
-  defaultPath?: string
-]
-
-// packages/desktop/src/main/menu/actions/file.ts handleResponseForSave and Save As.
-const saveTab = async(
-  forceDialog: boolean,
-  ...[id, filename, pathname, markdown, options, defaultPath]: SaveRequest
-): Promise<void> => {
-  const existedOnDisk = !!pathname && (await invoke<boolean>('path_exists', { path: pathname }))
-  let target = pathname
-
-  if (forceDialog || !pathname) {
-    const name = /\.[a-z0-9]+$/i.test(filename) ? filename : `${filename || 'Untitled'}.md`
-    const directory = pathname ? path.dirname(pathname) : defaultPath || boot.env.HOME || ''
-    const chosen = await saveDialog({
-      defaultPath: directory ? path.join(directory, name) : name,
-      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
-    })
-    if (!chosen) return
-    target = chosen
-  }
-
-  try {
-    await writeMarkdownFile(target, markdown, options)
-    if (target !== pathname || !existedOnDisk) {
-      // file.ts emits window-change-file-path or window-add-file-path here.
-      if (pathname && pathname !== target) {
-        void invoke('window_change_file', { oldPath: pathname, path: target })
-      } else {
-        void invoke('window_add_file', { path: target })
-      }
-      emitToRenderer('mt::set-pathname', { id, pathname: target, filename: path.basename(target) })
-    } else {
-      emitToRenderer('mt::tab-saved', id)
-    }
-  } catch (err) {
-    emitToRenderer('mt::tab-save-failure', id, String(err))
-  }
-}
-
-// ---- window ----------------------------------------------------------------
-
-let isFullscreen = false
-
-const setFullscreen = async(flag: boolean): Promise<void> => {
-  await appWindow.setFullscreen(flag)
-  isFullscreen = flag
-  emitToRenderer(flag ? 'mt::window-enter-full-screen' : 'mt::window-leave-full-screen')
-}
-
-const newWindow = (): Promise<unknown> => invoke('new_editor_window', { files: [] })
-
-const closeWindow = async(): Promise<void> => {
-  await appWindow.destroy()
-}
-
-const listenForPreferences = (): Promise<unknown> =>
-  listen<Preferences>('mt::user-preference', ({ payload }) => {
-    preferences = { ...preferences, ...payload }
-    emitToRenderer('mt::user-preference', forRenderer(payload))
-  })
-
-const installWindowEvents = async(): Promise<void> => {
-  let wasMaximized = await appWindow.isMaximized()
-  await appWindow.onResized(async() => {
-    const maximized = await appWindow.isMaximized()
-    if (maximized === wasMaximized) return
-    wasMaximized = maximized
-    emitToRenderer(maximized ? 'mt::window-maximize' : 'mt::window-unmaximize')
-  })
-  await appWindow.onFocusChanged(({ payload }) => {
-    emitToRenderer('mt::window-active-status', { status: payload })
-  })
-  // The window manager's close (Alt+F4) asks the renderer about unsaved tabs first.
-  await appWindow.onCloseRequested((event) => {
-    event.preventDefault()
-    emitToRenderer('mt::ask-for-close')
-  })
-
-  // Electron copies document.title into the window title; Tauri does not.
-  const title = document.querySelector('title')
-  if (title) {
-    new MutationObserver(() => appWindow.setTitle(document.title)).observe(title, {
-      childList: true,
-      characterData: true,
-      subtree: true
-    })
-  }
-
-  // Replaces `-webkit-app-region: drag` on the custom title bar
-  // (components/titleBar/index.vue), which only Chromium understands.
-  const noDrag = '.title-no-drag, .frameless-titlebar-button, .word-count, button, input, a'
-  window.addEventListener('mousedown', (event) => {
-    const target = event.target as Element | null
-    if (event.button !== 0 || !target?.closest('.title-bar') || target.closest(noDrag)) return
-    if (event.detail === 2) appWindow.toggleMaximize()
-    else appWindow.startDragging()
-  })
 }
 
 // ---- commands from shortcuts -----------------------------------------------
@@ -349,14 +154,16 @@ const runCommand = (id: string): boolean => {
         emitToRenderer('mt::editor-close-tab')
         break
       case 'file.close-window':
-      case 'file.quit':
         emitToRenderer('mt::ask-for-close')
+        break
+      case 'file.quit':
+        void quitApp()
         break
       case 'window.minimize':
         void appWindow.minimize()
         break
       case 'window.toggle-full-screen':
-        void setFullscreen(!isFullscreen)
+        void setFullscreen(!fullscreen())
         break
       case 'view.command-palette':
         emitToRenderer('mt::show-command-palette')
@@ -397,35 +204,7 @@ const runCommand = (id: string): boolean => {
   return true
 }
 
-// ---- menus -----------------------------------------------------------------
-
-// Placeholder for the ☰ menu until it is built from the desktop menu templates
-// (packages/desktop/src/main/menu/templates).
-const applicationMenu = (): MenuTemplate => {
-  const item = (id: string, label: string) => ({ id, label, accelerator: keybindings.get(id) })
-  return [
-    item('file.new-tab', 'New Tab'),
-    item('file.new-window', 'New Window'),
-    item('file.open-file', 'Open File...'),
-    { type: 'separator' },
-    item('file.save', 'Save'),
-    item('file.save-as', 'Save As...'),
-    { type: 'separator' },
-    {
-      label: 'View',
-      submenu: [
-        item('view.command-palette', 'Command Palette...'),
-        item('view.source-code-mode', 'Source Code Mode'),
-        item('view.typewriter-mode', 'Typewriter Mode'),
-        item('view.focus-mode', 'Focus Mode'),
-        item('view.toggle-sidebar', 'Toggle Sidebar'),
-        item('view.toggle-tabbar', 'Toggle Tab Bar')
-      ]
-    },
-    { type: 'separator' },
-    item('file.close-window', 'Close Window')
-  ]
-}
+// ---- renderer context menus --------------------------------------------------
 
 const menuPrefix = `${appWindow.label}:`
 
@@ -438,9 +217,6 @@ const showRendererMenu = (template: MenuTemplate, position?: MenuPopupPosition) 
     emitToRenderer('mt::menu::click', { windowId: boot.windowId, id })
     emitToRenderer('mt::menu::closed', { windowId: boot.windowId })
   })
-
-const showApplicationMenu = (position?: MenuPopupPosition) =>
-  popupMenu(applicationMenu(), position, `${menuPrefix}app:`, (id) => runCommand(id))
 
 // ---- channel handlers ------------------------------------------------------
 
@@ -488,11 +264,11 @@ const registerHandlers = (): void => {
   onSend('mt::win::unmaximize', () => appWindow.unmaximize())
   onSend('mt::win::toggle-maximize', () => appWindow.toggleMaximize())
   onSend('mt::win::set-fullscreen', (flag: boolean) => setFullscreen(flag))
-  onSend('mt::win::toggle-fullscreen', () => setFullscreen(!isFullscreen))
+  onSend('mt::win::toggle-fullscreen', () => setFullscreen(!fullscreen()))
   onInvoke('mt::win::is-maximized', () => appWindow.isMaximized())
   onInvoke('mt::win::is-fullscreen', () => appWindow.isFullscreen())
   onSend('mt::menu::popup', showRendererMenu)
-  onSend('mt::menu::popup-application', showApplicationMenu)
+  registerMenuHandlers()
 
   onSend('mt::shell::show-item', (fullPath: string) => revealItemInDir(fullPath))
   onInvoke('mt::shell::open-external', (url: string) => openUrl(url))
@@ -514,15 +290,8 @@ const registerHandlers = (): void => {
     console.error('[renderer error]', ...args)
   )
 
-  // Menu and session bookkeeping that has no counterpart in the trial.
-  for (const channel of [
-    'mt::window-initialized',
-    'mt::view-layout-changed',
-    'mt::update-line-ending-menu',
-    'mt::set-editor-format-menus-enabled',
-    'mt::update-format-menu',
-    'mt::ask-for-open-project-in-sidebar'
-  ]) {
+  // Bookkeeping that has no counterpart in the trial.
+  for (const channel of ['mt::window-initialized', 'mt::ask-for-open-project-in-sidebar']) {
     onSend(channel, () => {})
   }
 }

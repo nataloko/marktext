@@ -1,4 +1,5 @@
-import { resolve, dirname } from 'path'
+import { existsSync } from 'fs'
+import { resolve, dirname, relative } from 'path'
 import { fileURLToPath } from 'url'
 import { defineConfig, type PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -7,10 +8,34 @@ import postcssPresetEnv from 'postcss-preset-env'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const desktop = resolve(__dirname, '../desktop')
+const desktopSrc = resolve(desktop, 'src')
+const standIns = resolve(__dirname, 'src/stand-ins')
+const isInside = (dir: string, file: string): boolean => !relative(dir, file).startsWith('..')
+
+// The ☰ menu runs Electron's menu templates and actions in the page. Modules
+// they import that need Node or Electron resolve to src/stand-ins/<same path>
+// instead (src/stand-ins/README.md). Only imports from main process code and
+// from this package are checked, so the renderer resolves as before.
+const mainStandIns = (): PluginOption => ({
+  name: 'marktext-main-stand-ins',
+  enforce: 'pre',
+  async resolveId(source, importer, options) {
+    if (!importer) return null
+    const from = importer.split('?')[0]
+    if (!isInside(resolve(desktopSrc, 'main'), from) && !isInside(__dirname, from)) return null
+    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true })
+    if (!resolved || resolved.external) return null
+    const target = resolved.id.split('?')[0]
+    if (!isInside(desktopSrc, target)) return null
+    const standIn = resolve(standIns, relative(desktopSrc, target))
+    return existsSync(standIn) ? standIn : null
+  }
+})
 
 // Mirrors the `renderer` section of packages/desktop/electron.vite.config.ts so
-// the unmodified renderer builds the same way. The only addition is the
-// `electron` alias, which lets the unmodified preload run inside the page.
+// the unmodified renderer builds the same way. The additions are the `electron`
+// alias, which lets the unmodified preload run inside the page, and the main
+// process stand-ins for the ☰ menu.
 export default defineConfig({
   clearScreen: false,
   assetsInclude: ['**/*.md'],
@@ -30,7 +55,7 @@ export default defineConfig({
   optimizeDeps: {
     include: ['pako', 'pathe']
   },
-  plugins: [vue(), svgLoader()] as PluginOption[],
+  plugins: [mainStandIns(), vue(), svgLoader()] as PluginOption[],
   css: {
     postcss: {
       plugins: [

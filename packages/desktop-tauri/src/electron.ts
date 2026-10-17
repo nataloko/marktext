@@ -3,8 +3,12 @@
 // this file, so the preload runs unchanged inside the Tauri page and keeps
 // building the same `window.*` globals the renderer expects. Whatever the
 // preload sends "to main" lands in the handlers registered by ./backend.
+// The end of the file stands in for the main process API that the reused
+// menu modules import.
 
+import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 type Listener = (event: unknown, ...args: unknown[]) => void
 // Accepts handlers with any parameter list; arguments arrive untyped from the preload.
@@ -181,3 +185,48 @@ export const webUtils = {
 }
 
 export type IpcRendererEvent = typeof rendererEvent
+
+// ---- main process side ------------------------------------------------------
+// The Electron main process modules that run in the page unchanged (the menu
+// templates and most menu actions, see vite.config.ts) import these. Their
+// internal events (`ipcMain.emit`) reach the handlers this window registers
+// with `ipcMain.on`.
+
+const mainHandlers = new Map<string, Handler>()
+
+export const ipcMain = {
+  on(channel: string, handler: Handler) {
+    mainHandlers.set(channel, handler)
+    return ipcMain
+  },
+
+  emit(channel: string, ...args: unknown[]): boolean {
+    const handler = mainHandlers.get(channel)
+    if (!handler) {
+      reportMissing('main event', channel)
+      return false
+    }
+    Promise.resolve()
+      .then(() => (handler as UntypedHandler)(...args))
+      .catch((err) => console.error(`[tauri] main event "${channel}" failed`, err))
+    return true
+  }
+}
+
+export const app = {
+  // Templates pass `app.quit` itself as a click handler, so no `this`.
+  quit(): void {
+    invoke('quit_app').catch((err) => console.error('[tauri] quit failed', err))
+  }
+}
+
+export const shell = {
+  openExternal: (url: string): Promise<void> => openUrl(url)
+}
+
+// Only the macOS branches use these.
+export const Menu = {
+  sendActionToFirstResponder(): void {},
+  getApplicationMenu: (): null => null
+}
+export const screen = {}
