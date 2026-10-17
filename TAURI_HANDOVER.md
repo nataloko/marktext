@@ -284,6 +284,22 @@ written nor broadcast; every window saves `sideBarVisibility` while booting
 `cargo test` in `src-tauri` covers the load rules. Not ported: schema
 validation and system language detection on first run.
 
+Window registry and single instance, ADR step 3 (commit `d2c1ad43`), checked
+on Xvfb with a second launch for each case: `src-tauri/src/windows.rs` keeps
+each window's open files (reported by the page when it opens, saves under a new
+name or closes a tab) and the focus order. A second launch hands its arguments
+to the running app (tauri-plugin-single-instance, over D-Bus on Linux) and exits
+in about 0.3 s. Its files go to one window when only one is open, otherwise to
+the window holding files from the same folder, otherwise to the last focused
+one; `--new-window` and the `openFilesInNewWindow` preference open new windows;
+no files just raises the last window. Deliberate difference: a file already open
+in some window goes to that window, which switches to its tab (Electron means to
+skip it, but its scoring only notices files open in the first window). Not done:
+folders (need the sidebar), files that do not exist yet (passed on, so the
+page shows "Cannot open tab"; Electron opens them as named empty documents),
+and raising windows on Wayland is untested. Note that any running build,
+debug or release, now catches launches of the other.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -375,7 +391,7 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
 | Find in folder | `mt::rg::*` (ripgrep; can ship as a Tauri sidecar binary) |
 | Recent files | `src/main/menu/` |
-| Window registry, choosing a window for a file, single instance (new windows open already) | `src/main/app/windowManager.ts` |
+| Folders on the command line or from a second launch; missing CLI files as named empty documents | `src/main/app/index.ts _openPathList`, `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Preferences window | renderer route `/preference`, window type `settings`, `src/main/windows/setting.ts` |
 | User keybindings (`keybindings.json`) | `src/main/keyboard/shortcutHandler.ts` |

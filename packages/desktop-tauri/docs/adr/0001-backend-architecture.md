@@ -218,8 +218,9 @@ To revisit:
 2. [x] Preferences in Rust: store with defaults, atomic writes, broadcast of
    `mt::user-preference` to all windows. Small, and proves a command plus a
    broadcast end to end. Done in `acd695ab`.
-3. [ ] Window registry and single instance: per window open file lists, opening a
-   second launch's files in the best window, a new window command.
+3. [x] Window registry and single instance: per window open file lists, opening a
+   second launch's files in the best window, a new window command. Done in
+   `d2c1ad43`; folders wait for the sidebar.
 4. [ ] Review the trial's general commands (`read_text_file`, `write_text_file`,
    the `opener` path scope) against the boundary rule and narrow them.
 5. [ ] ☰ menu in TS from the desktop menu templates, with recent files from Rust.
