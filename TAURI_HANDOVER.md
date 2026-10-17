@@ -40,9 +40,8 @@ Known risks going in:
 | Other change | `pnpm-lock.yaml` (entries for the new package only) |
 | Commit email (local git config) | `93059500+nataloko@users.noreply.github.com` |
 
-**At the time of writing nothing was committed or pushed**, and the repo had no
-`user.name` set. Before switching machines: set `user.name`, commit the trial on
-`tauri-trial`, and push it to `origin`. The old machine's scratchpad (screenshots,
+The trial was committed on `tauri-trial` and pushed to `origin` on 2026-10-17,
+after moving to the desktop machine. The old machine's scratchpad (screenshots,
 test result JSON files, the Playwright WebKit setup) has already been wiped; the
 results are recorded in section 6 below.
 
@@ -162,6 +161,13 @@ moved):
 Then Rust via rustup, Node >= 20.19, pnpm 10, and the Tauri CLI:
 `cargo install tauri-cli --version "^2" --locked`.
 
+Fedora Atomic (the current desktop machine): everything runs in a distrobox
+named `marktext`, made from `registry.fedoraproject.org/fedora-toolbox:44`, with
+the Fedora packages above plus `gcc gcc-c++ make rust cargo nodejs npm` from dnf
+and `sudo corepack enable` for pnpm. `cargo-tauri` lands in `~/.cargo/bin`, so
+add that to `PATH` inside the box. Run every command through
+`distrobox enter marktext -- ...`; the app opens on the host desktop from there.
+
 ### Windows prerequisites (untested so far)
 
 Visual Studio Build Tools (C++ workload), Rust (MSVC toolchain), Node, pnpm,
@@ -205,6 +211,7 @@ src-tauri/target/release/marktext-tauri path/to/file.md
 `cargo build` on its own produces a binary that loads `devUrl`, not the bundled
 files. On the old 4 core machine a cold debug build took ~15 min and a cold
 release build (LTO, opt-level s) ~33 min; incremental builds take under a minute.
+On the 16 core desktop a cold release build takes ~3.5 min.
 
 ### Checks
 
@@ -236,6 +243,12 @@ Tested on a virtual display (Xvfb) on the old machine, driven with xdotool:
 
 Not verified: Ctrl+B with nothing selected did nothing. Not checked whether
 Electron behaves the same.
+
+Hands on test on a real desktop, 2026-10-17 (Fedora 44, GNOME on Wayland,
+WebKitGTK 2.54.1, release build): a checklist covering section 8 steps 1 and 2 (rendering,
+typing, paste, code block Enter, window resize and drag, save dialog, close
+prompt, scaling) was tried by hand and reported as all working. No detailed
+notes per item.
 
 ## 6. Measurements and test results
 
