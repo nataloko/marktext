@@ -102,7 +102,13 @@ const setWindowUrlParams = (): void => {
 
 // ---- files -----------------------------------------------------------------
 
+// Rust keeps each window's open files (src-tauri/src/windows.rs), as
+// packages/desktop/src/main/windows/editor.ts openTabsFromPaths does.
 const openTab = async(pathname: string, selected = true): Promise<void> => {
+  if (!(await invoke<boolean>('window_add_file', { path: pathname }))) {
+    emitToRenderer('mt::switch-tab-by-file_path', pathname, {})
+    return
+  }
   try {
     const document = await loadMarkdownFile(pathname, {
       preferredEol: preferredEol(),
@@ -111,6 +117,7 @@ const openTab = async(pathname: string, selected = true): Promise<void> => {
     })
     emitToRenderer('mt::open-new-tab', document, {}, selected)
   } catch (err) {
+    void invoke('window_remove_file', { path: pathname })
     emitToRenderer('mt::show-notification', {
       title: 'Cannot open tab',
       type: 'error',
@@ -119,15 +126,18 @@ const openTab = async(pathname: string, selected = true): Promise<void> => {
   }
 }
 
+const openTabs = async(paths: string[]): Promise<void> => {
+  for (const [index, pathname] of paths.entries()) {
+    await openTab(pathname, index === 0)
+  }
+}
+
 const showOpenDialog = async(): Promise<void> => {
   const picked = await openDialog({
     multiple: true,
     filters: [{ name: 'Markdown', extensions: MARKDOWN_EXTENSIONS }]
   })
-  const paths = picked === null ? [] : Array.isArray(picked) ? picked : [picked]
-  for (const [index, pathname] of paths.entries()) {
-    await openTab(pathname, index === 0)
-  }
+  await openTabs(picked === null ? [] : Array.isArray(picked) ? picked : [picked])
 }
 
 // Arguments of mt::response-file-save and mt::response-file-save-as.
@@ -162,6 +172,12 @@ const saveTab = async(
   try {
     await writeMarkdownFile(target, markdown, options)
     if (target !== pathname || !existedOnDisk) {
+      // file.ts emits window-change-file-path or window-add-file-path here.
+      if (pathname && pathname !== target) {
+        void invoke('window_change_file', { oldPath: pathname, path: target })
+      } else {
+        void invoke('window_add_file', { path: target })
+      }
       emitToRenderer('mt::set-pathname', { id, pathname: target, filename: path.basename(target) })
     } else {
       emitToRenderer('mt::tab-saved', id)
@@ -450,6 +466,10 @@ const registerHandlers = (): void => {
   )
 
   onSend('mt::cmd-open-file', showOpenDialog)
+  onSend('mt::open-file', (pathname: string) => openTab(pathname))
+  onSend('mt::window-tab-closed', (pathname: string) =>
+    invoke('window_remove_file', { path: pathname })
+  )
   onSend('mt::cmd-new-editor-window', newWindow)
   onSend('mt::response-file-save', (...args: SaveRequest) => saveTab(false, ...args))
   onSend('mt::response-file-save-as', (...args: SaveRequest) => saveTab(true, ...args))
@@ -507,21 +527,30 @@ const registerHandlers = (): void => {
   }
 }
 
+// Files a second launch sends to this window (src-tauri/src/windows.rs). They
+// open after the window's own files, in the order they arrive.
+let opening: Promise<void> = Promise.resolve()
+
+const listenForFiles = (): Promise<unknown> =>
+  appWindow.listen<string[]>('mt::tauri::open-files', ({ payload }) => {
+    opening = opening.then(() => openTabs(payload))
+  })
+
 const bootEditor = async(): Promise<void> => {
+  // Files routed here while the window was loading waited in Rust until now.
+  const files = [...boot.openFiles, ...(await invoke<string[]>('window_ready'))]
   await whenListening('mt::bootstrap-editor')
   emitToRenderer('mt::bootstrap-editor', {
-    addBlankTab: boot.openFiles.length === 0,
+    addBlankTab: files.length === 0,
     markdownList: [],
     lineEnding: preferredEol(),
     sideBarVisibility: preferences.restoreLayoutState ? !!preferences.sideBarVisibility : false,
     tabBarVisibility: !!preferences.tabBarVisibility,
     sourceCodeModeEnabled: !!preferences.sourceCodeModeEnabled
   })
-  if (!boot.openFiles.length) return
+  if (!files.length) return
   await whenListening('mt::open-new-tab')
-  for (const [index, pathname] of boot.openFiles.entries()) {
-    await openTab(pathname, index === 0)
-  }
+  await openTabs(files)
 }
 
 // Must finish before the preload runs, because the preload reads boot info
@@ -533,5 +562,6 @@ export const startBackend = async(): Promise<void> => {
   setWindowUrlParams()
   installShortcuts(keybindings, runCommand)
   await installWindowEvents()
-  void bootEditor()
+  await listenForFiles()
+  opening = bootEditor()
 }

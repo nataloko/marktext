@@ -49,6 +49,10 @@ impl Preferences {
     fn lock(&self) -> MutexGuard<'_, Store> {
         self.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    pub fn get(&self, key: &str) -> Option<Value> {
+        self.lock().values.get(key).cloned()
+    }
 }
 
 fn read_stored(path: &Path) -> Option<Map<String, Value>> {

@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 mod preferences;
+mod windows;
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
 const MARKDOWN_EXTENSIONS: [&str; 11] = [
@@ -69,11 +70,26 @@ fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn files_from_command_line(cwd: &Path) -> Vec<String> {
-    std::env::args()
-        .skip(1)
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| MARKDOWN_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+// Markdown files named on a command line, resolved against `cwd`
+// (packages/desktop/src/main/filesystem/markdown.ts normalizeCliMarkdownPath).
+// Files that do not exist yet are passed on when their folder exists; folders
+// are skipped until the sidebar is ported.
+fn markdown_files(cwd: &Path, args: &[String]) -> Vec<String> {
+    args.iter()
         .filter(|arg| !arg.starts_with('-'))
-        .map(|arg| display(&cwd.join(arg)))
+        .filter_map(|arg| {
+            let path = cwd.join(arg);
+            match std::fs::canonicalize(&path) {
+                Ok(real) => (real.is_file() && is_markdown(&real)).then(|| display(&real)),
+                Err(_) => (is_markdown(&path) && path.parent().is_some_and(Path::is_dir)).then(|| display(&path)),
+            }
+        })
         .collect()
 }
 
@@ -159,7 +175,7 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
 }
 
 // One editor window with its own boot info (packages/desktop/src/main/windows/editor.ts).
-fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
+pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
     let user_data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&user_data)?;
     let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
@@ -171,18 +187,17 @@ fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result
     // No system title bar: the renderer draws its own (titleBarStyle "custom").
     // The native drag and drop handler would swallow HTML drop events
     // that the editor relies on.
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        format!("editor-{window_id}"),
-        tauri::WebviewUrl::default(),
-    )
-    .title("MarkText")
-    .inner_size(1200.0, 800.0)
-    .min_inner_size(400.0, 300.0)
-    .decorations(false)
-    .disable_drag_drop_handler()
-    .initialization_script(script)
-    .build()?;
+    let registry = app.state::<windows::Windows>();
+    registry.add(window_id);
+    let window = tauri::WebviewWindowBuilder::new(app, windows::label(window_id), tauri::WebviewUrl::default())
+        .title("MarkText")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(400.0, 300.0)
+        .decorations(false)
+        .disable_drag_drop_handler()
+        .initialization_script(script)
+        .build()
+        .inspect_err(|_| registry.remove(window_id))?;
 
     // Debug builds print the page console, including script load
     // errors, to the terminal.
@@ -206,6 +221,10 @@ async fn new_editor_window(app: AppHandle, files: Vec<String>) -> Result<(), Str
 
 fn main() {
     tauri::Builder::default()
+        // Must come first, so a second launch exits before doing anything else.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            windows::second_launch(app, argv, cwd)
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -215,15 +234,53 @@ fn main() {
             toggle_devtools,
             new_editor_window,
             preferences::get_preferences,
-            preferences::set_preferences
+            preferences::set_preferences,
+            windows::window_add_file,
+            windows::window_change_file,
+            windows::window_remove_file,
+            windows::window_ready
         ])
+        .manage(windows::Windows::default())
+        .on_window_event(|window, event| {
+            let Some(id) = windows::id_from_label(window.label()) else { return };
+            match event {
+                tauri::WindowEvent::Focused(true) => window.state::<windows::Windows>().focus(id),
+                tauri::WindowEvent::Destroyed => window.state::<windows::Windows>().remove(id),
+                _ => {}
+            }
+        })
         .setup(|app| {
             let user_data = app.path().app_data_dir()?;
             app.manage(preferences::Preferences::load(user_data.join("preferences.json")));
             let cwd = std::env::current_dir().unwrap_or_default();
-            open_editor_window(app.handle(), files_from_command_line(&cwd))?;
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            open_editor_window(app.handle(), markdown_files(&cwd, &args))?;
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running MarkText");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_files_keeps_markdown_and_new_files() {
+        let dir = std::env::temp_dir().join(format!("mt-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("folder")).unwrap();
+        std::fs::write(dir.join("notes.MD"), "").unwrap();
+        std::fs::write(dir.join("image.png"), "").unwrap();
+        let real = std::fs::canonicalize(&dir).unwrap();
+
+        let args: Vec<String> = ["--new-window", "notes.MD", "image.png", "folder", "new.md", "gone/new.md"]
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+        assert_eq!(
+            markdown_files(&dir, &args),
+            vec![display(&real.join("notes.MD")), display(&dir.join("new.md"))]
+        );
+    }
 }
