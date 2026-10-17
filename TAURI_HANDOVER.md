@@ -225,8 +225,9 @@ node_modules/.bin/eslint packages/desktop-tauri/src packages/desktop-tauri/vite.
 
 ESLint is clean. The repo's Prettier config adds `async (` but ESLint wants
 `async(`; ESLint is what CI enforces, so run `eslint --fix` after Prettier.
-There is no typecheck for the new package yet (the entry pulls in the whole
-renderer, which needs the desktop tsconfig).
+`pnpm --filter marktext-tauri typecheck` type checks the package's own files
+against the desktop tsconfig. It leaves out `src/entry.ts`, which pulls in the
+whole renderer (that needs vue-tsc and Muya's built types).
 
 ## 5. What works (tested on Linux, release and debug builds)
 
