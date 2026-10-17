@@ -5,13 +5,13 @@
 // Anything not handled here is logged once by ./electron.
 
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { createPlatformPath } from 'common/filesystem/platformPath'
 import type { BootInfo } from '@shared/types/ipc'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
-import defaultPreferences from '../../desktop/static/preference.json'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
 import { loadMarkdownFile, writeMarkdownFile, type MarkdownOptions } from './markdown'
 import { popupMenu } from './menu'
@@ -52,36 +52,30 @@ const translations = import.meta.glob('../../desktop/static/locales/*.json', { i
 
 // ---- preferences -----------------------------------------------------------
 
+// The store lives in Rust (src-tauri/src/preferences.rs); this is the
+// window's copy, kept current by the `mt::user-preference` broadcast.
 type Preferences = Record<string, unknown>
 
-const preferencesPath = path.join(boot.paths.userData, 'preferences.json')
-let preferences: Preferences = { ...defaultPreferences }
+let preferences: Preferences = {}
 
 const loadPreferences = async(): Promise<void> => {
-  let stored: Preferences = {}
-  try {
-    stored = JSON.parse(await invoke<string>('read_text_file', { path: preferencesPath }))
-  } catch {
-    // First run (packages/desktop/src/main/preferences/index.ts:65).
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) stored.theme = 'dark'
-  }
-  preferences = { ...defaultPreferences, ...stored }
+  // Only used on first run, to pick the theme (main/preferences/index.ts init).
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  preferences = await invoke<Preferences>('get_preferences', { prefersDark })
 }
 
-const savePreferences = (): Promise<unknown> =>
-  invoke('write_text_file', {
-    path: preferencesPath,
-    contents: JSON.stringify(preferences, null, 2)
-  })
+const setPreferences = (changes: Preferences): Promise<unknown> =>
+  invoke('set_preferences', { changes })
 
-// What the renderer sees. Session restore is not implemented in the trial, so
-// "restoreAll" would let the window close without asking about unsaved tabs
-// (store/editor.ts LISTEN_FOR_CLOSE).
-const rendererPreferences = (): Preferences => ({
-  ...preferences,
-  startUpAction: preferences.startUpAction === 'restoreAll' ? 'blank' : preferences.startUpAction,
-  titleBarStyle: 'custom'
-})
+// What the renderer sees, for the full set or a change. Session restore is not
+// implemented in the trial, so "restoreAll" would let the window close without
+// asking about unsaved tabs (store/editor.ts LISTEN_FOR_CLOSE).
+const forRenderer = (prefs: Preferences): Preferences => {
+  const shown = { ...prefs }
+  if (shown.startUpAction === 'restoreAll') shown.startUpAction = 'blank'
+  delete shown.titleBarStyle
+  return shown
+}
 
 const preferredEol = (): 'lf' | 'crlf' => {
   const endOfLine = preferences.endOfLine
@@ -192,6 +186,12 @@ const newWindow = (): Promise<unknown> => invoke('new_editor_window', { files: [
 const closeWindow = async(): Promise<void> => {
   await appWindow.destroy()
 }
+
+const listenForPreferences = (): Promise<unknown> =>
+  listen<Preferences>('mt::user-preference', ({ payload }) => {
+    preferences = { ...preferences, ...payload }
+    emitToRenderer('mt::user-preference', forRenderer(payload))
+  })
 
 const installWindowEvents = async(): Promise<void> => {
   let wasMaximized = await appWindow.isMaximized()
@@ -437,17 +437,14 @@ const registerHandlers = (): void => {
   )
 
   onSend('mt::ask-for-user-preference', () =>
-    emitToRenderer('mt::user-preference', rendererPreferences())
+    emitToRenderer('mt::user-preference', { ...forRenderer(preferences), titleBarStyle: 'custom' })
   )
   onSend('mt::ask-for-user-data', () => emitToRenderer('mt::user-preference', {}))
   onSend('mt::get-current-language', () =>
     emitToRenderer('mt::current-language', preferences.language || 'en')
   )
-  onSend('mt::set-user-preference', async(settings: Preferences) => {
-    preferences = { ...preferences, ...settings }
-    await savePreferences()
-    emitToRenderer('mt::user-preference', settings)
-  })
+  onSend('mt::set-user-preference', setPreferences)
+  onSend('mt::cmd-toggle-autosave', () => setPreferences({ autoSave: !preferences.autoSave }))
   onSend('mt::request-keybindings', () =>
     emitToRenderer('mt::keybindings-response', Object.fromEntries(keybindings))
   )
@@ -531,6 +528,7 @@ const bootEditor = async(): Promise<void> => {
 // synchronously and the renderer reads its settings from the URL.
 export const startBackend = async(): Promise<void> => {
   registerHandlers()
+  await listenForPreferences()
   await loadPreferences()
   setWindowUrlParams()
   installShortcuts(keybindings, runCommand)

@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
+
+mod preferences;
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
 const MARKDOWN_EXTENSIONS: [&str; 11] = [
@@ -118,21 +120,25 @@ fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|_| format!("{path} is not UTF-8. Other encodings are not supported in the Tauri trial."))
 }
 
+// Writes beside the target and renames over it, so a failed write never
+// leaves a truncated file behind.
+fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let name = target
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file path"))?;
+    if let Some(dir) = target.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let temp = target.with_file_name(format!(".{}.marktext-tmp", name.to_string_lossy()));
+    std::fs::write(&temp, contents)?;
+    std::fs::rename(&temp, target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
+}
+
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    let target = PathBuf::from(&path);
-    let name = target.file_name().ok_or_else(|| format!("{path}: not a file path"))?;
-    if let Some(dir) = target.parent() {
-        std::fs::create_dir_all(dir).map_err(|err| format!("{path}: {err}"))?;
-    }
-    // Write beside the target and rename over it, so a failed write never
-    // leaves a truncated file behind.
-    let temp = target.with_file_name(format!(".{}.marktext-tmp", name.to_string_lossy()));
-    std::fs::write(&temp, contents).map_err(|err| format!("{path}: {err}"))?;
-    std::fs::rename(&temp, &target).map_err(|err| {
-        let _ = std::fs::remove_file(&temp);
-        format!("{path}: {err}")
-    })
+    write_atomic(Path::new(&path), contents.as_bytes()).map_err(|err| format!("{path}: {err}"))
 }
 
 #[tauri::command]
@@ -207,9 +213,13 @@ fn main() {
             write_text_file,
             path_exists,
             toggle_devtools,
-            new_editor_window
+            new_editor_window,
+            preferences::get_preferences,
+            preferences::set_preferences
         ])
         .setup(|app| {
+            let user_data = app.path().app_data_dir()?;
+            app.manage(preferences::Preferences::load(user_data.join("preferences.json")));
             let cwd = std::env::current_dir().unwrap_or_default();
             open_editor_window(app.handle(), files_from_command_line(&cwd))?;
             Ok(())
