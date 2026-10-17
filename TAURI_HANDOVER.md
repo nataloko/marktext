@@ -221,7 +221,12 @@ On the 16 core desktop a cold release build takes ~3.5 min.
 
 ```bash
 node_modules/.bin/eslint packages/desktop-tauri/src packages/desktop-tauri/vite.config.ts
+pnpm --filter marktext-tauri typecheck
+(cd packages/desktop-tauri/src-tauri && cargo test && cargo clippy --all-targets)
 ```
+
+The existing Rust code is not formatted with rustfmt defaults, so `cargo fmt`
+would reformat whole files; keep to the surrounding style instead.
 
 ESLint is clean. The repo's Prettier config adds `async (` but ESLint wants
 `async(`; ESLint is what CI enforces, so run `eslint --fix` after Prettier.
@@ -266,7 +271,25 @@ xdotool and by hand on GNOME Wayland:
   placeholder ☰ menu. Placement is right on X11 and Wayland, clicks reach the
   renderer, and reopening after Escape works.
 - Gap: GTK popup menus show no shortcut labels (Electron shows "Ctrl+T" etc.).
-- Each window still loads preferences on its own; ADR step 2 fixes that.
+
+Preferences in Rust, ADR step 2 (commit `acd695ab`), checked on Xvfb:
+`src-tauri/src/preferences.rs` owns `preferences.json` (same app data dir as
+before). It applies Electron's start up rules (drop unknown keys, add new ones,
+the `lastState` migration, dark theme on first run if the page reports a dark
+system theme) and broadcasts each real change to every window as
+`mt::user-preference`. A theme change from the command palette in one window
+restyles all windows and survives a restart. Unchanged values are neither
+written nor broadcast; every window saves `sideBarVisibility` while booting
+(`renderer/src/store/layout.ts:76`), so this keeps new windows quiet.
+`cargo test` in `src-tauri` covers the load rules. Not ported: schema
+validation and system language detection on first run.
+
+Upstream renderer bug seen in passing: the command palette's Change Theme list
+shows ids ("window.change-theme-light") instead of names, because
+`getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
+theme names and then its recursive call overwrites them with
+`getCommandDescriptionById`, which returns the id for unknown commands. Same
+code in Electron; worth a fix upstream.
 
 ## 6. Measurements and test results
 

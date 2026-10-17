@@ -215,9 +215,9 @@ To revisit:
 1. [x] Spike: open a second window from Rust with its own `initialization_script`,
    and show a JS popup menu from the custom title bar, on GNOME Wayland and X11.
    Works on both (`c2463d77`); GTK popups show no shortcut labels.
-2. [ ] Preferences in Rust: store with defaults, atomic writes, broadcast of
+2. [x] Preferences in Rust: store with defaults, atomic writes, broadcast of
    `mt::user-preference` to all windows. Small, and proves a command plus a
-   broadcast end to end.
+   broadcast end to end. Done in `acd695ab`.
 3. [ ] Window registry and single instance: per window open file lists, opening a
    second launch's files in the best window, a new window command.
 4. [ ] Review the trial's general commands (`read_text_file`, `write_text_file`,
