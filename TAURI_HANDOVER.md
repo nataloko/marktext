@@ -348,14 +348,29 @@ UTF-32 BOM detection (as in Electron), files that do not exist yet.
 
 File watching, ADR step 6 part 2, checked on Xvfb: `src-tauri/src/watch.rs`
 watches the folder of every open file (so replace by rename is seen), waits
-until a file has been quiet for a second, and reports it only when its content
-differs from what MarkText last read or wrote; that keeps MarkText's own saves
-quiet without Electron's 1.3 s ignore window. The page loads the file and
+until a file has been quiet for a second, and reports it to each window whose
+own last read or write of it had different content; so a window's own save is
+quiet for that window but reaches other windows with the file open, as with
+Electron's per window ignore list (without its 1.3 s time window). The page loads the file and
 sends Electron's `mt::update-file` payloads, so the renderer behaves as before:
 an unmodified tab reloads silently, a modified one asks, a deleted file warns,
 and a recreated one asks again. Watches follow the window registry (open,
 save under a new name, close tab, close window). Hitting the OS watch limit
 shows Electron's "inotify limit reached" notice once.
+
+Review of steps 5 and 6 (reviewer agent, 2026-10-17) and what came of it:
+- Fixed: a save in one window hid the change from other windows with the same
+  file open (per window hashes now, `db7f9508`); legacy text that would not
+  save back byte for byte (GBK A2 E3 is "€", which GBK writes as 80) now
+  refuses to open (`1ae638be`); temp files are unique, created with the
+  target's mode and retried on Windows sharing violations (`aa38507c`); links
+  open as their target so their folder is watched; watch keys ignore case on
+  Windows; a folder the OS refused is retried by the next file.
+- Open: the owner of a saved file is not kept (write-file-atomic chowns);
+  saves are synchronous commands, so a slow network drive freezes every window
+  (make the file commands async, which the unique temp names already allow);
+  on Windows the Edit menu's `document.execCommand` paste is probably blocked
+  by WebView2; the window registry compares paths case sensitively on Windows.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
