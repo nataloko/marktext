@@ -1,0 +1,25 @@
+{
+  "name": "marktext-tauri",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Trial: the MarkText renderer hosted in Tauri 2 instead of Electron",
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-opener": "^2.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.9",
+    "postcss-preset-env": "^11.6.1",
+    "vite": "^8.3.4",
+    "vite-svg-loader": "^5.1.3",
+    "vue": "^3.5.43"
+  }
+}

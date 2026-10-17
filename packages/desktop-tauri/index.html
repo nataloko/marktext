@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>MarkText</title>
+    <!-- Same policy as packages/desktop/src/renderer/index.html, plus the
+         sources Tauri needs: its IPC endpoint and the dev server socket. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+                  script-src 'self';
+                  style-src 'self' 'unsafe-inline';
+                  img-src * data: file: blob:;
+                  font-src 'self' data:;
+                  connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420;
+                  "
+    />
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/entry.ts"></script>
+  </body>
+</html>
