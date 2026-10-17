@@ -255,6 +255,19 @@ typing, paste, code block Enter, window resize and drag, save dialog, close
 prompt, scaling) was tried by hand and reported as all working. No detailed
 notes per item.
 
+Spike for ADR 0001, 2026-10-17 (commit `c2463d77`), checked on Xvfb with
+xdotool and by hand on GNOME Wayland:
+
+- Extra editor windows from Rust (`new_editor_window`), each with its own boot
+  info and window id, opened from the ☰ menu or Ctrl+N. Closing windows one by
+  one keeps the app running; closing the last one exits.
+- Native popup menus from page JS (`src/menu.ts`): the generic
+  `mt::menu::popup` channel (tab and sidebar right click menus) and a
+  placeholder ☰ menu. Placement is right on X11 and Wayland, clicks reach the
+  renderer, and reopening after Escape works.
+- Gap: GTK popup menus show no shortcut labels (Electron shows "Ctrl+T" etc.).
+- Each window still loads preferences on its own; ADR step 2 fixes that.
+
 ## 6. Measurements and test results
 
 ### Electron vs Tauri on the same machine and file
@@ -329,8 +342,8 @@ port. Unhandled channels are logged in debug builds (section 3).
 
 | Missing | Electron code / channel |
 |---|---|
-| ☰ application menu (button does nothing) | `mt::menu::popup-application`, `src/main/menu/` |
-| Right click context menus (untested) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
+| ☰ application menu (placeholder with a few items, `backend.ts applicationMenu`) | `mt::menu::popup-application`, `src/main/menu/` |
+| Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
 | Sidebar, open folder, file tree | `mt::ask-for-open-project-in-sidebar`, `src/main/menu/actions/file.ts`, `src/main/filesystem/watcher.ts` |
 | Reload when a file changes on disk | `mt::update-file`, `src/main/filesystem/watcher.ts` (chokidar; Rust `notify` crate) |
 | Encodings other than UTF8 | `src/main/filesystem/encoding.ts`, `markdown.ts` (ced + iconv; Rust `chardetng` + `encoding_rs`) |
@@ -339,7 +352,7 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
 | Find in folder | `mt::rg::*` (ripgrep; can ship as a Tauri sidecar binary) |
 | Recent files | `src/main/menu/` |
-| Multiple windows | `src/main/app/windowManager.ts` |
+| Window registry, choosing a window for a file, single instance (new windows open already) | `src/main/app/windowManager.ts` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Preferences window | renderer route `/preference`, window type `settings`, `src/main/windows/setting.ts` |
 | User keybindings (`keybindings.json`) | `src/main/keyboard/shortcutHandler.ts` |
