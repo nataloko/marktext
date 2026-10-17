@@ -1,6 +1,6 @@
 # ADR 0001: Where the main process logic lives in the Tauri port
 
-**Status:** Proposed
+**Status:** Accepted (2026-10-17)
 **Date:** 2026-10-17
 **Deciders:** Nata (fork owner)
 
@@ -223,4 +223,4 @@ To revisit:
    the `opener` path scope) against the boundary rule and narrow them.
 5. [ ] ☰ menu in TS from the desktop menu templates, with recent files from Rust.
 6. [ ] File watching and encodings in Rust.
-7. [ ] Update `TAURI_HANDOVER.md` sections 3 and 8 once this is accepted.
+7. [x] Update `TAURI_HANDOVER.md` sections 3 and 8 once this is accepted.

@@ -98,8 +98,12 @@ packages/desktop-tauri/
   Rust providing only primitives (read, write, exists). This was the fastest way
   to a working trial and keeps the channel payloads identical to Electron's.
   It will not stretch to multiple windows as is: each window would run its own
-  copy. Deciding where that logic lives long term (TS per window, a hidden
-  coordinator window, or Rust) is an open question, see section 8.
+  copy. **Decided 2026-10-17** in
+  `packages/desktop-tauri/docs/adr/0001-backend-architecture.md`: Rust owns app
+  wide state and OS work (start up, single instance, window registry,
+  preferences, recent files, file IO and watching, session store); each window
+  keeps a TypeScript backend for its own flows (its channel handlers, save and
+  close, menus, shortcuts).
 - **Events are delivered asynchronously and held until a listener exists**
   (`electron.ts`). Electron never drops main to renderer messages in practice
   because main sends after page load; the stand-in reproduces that.
@@ -345,6 +349,11 @@ port. Unhandled channels are logged in debug builds (section 3).
 Paths in this table are relative to `packages/desktop/`.
 
 ## 8. Next steps (suggested order)
+
+Steps 1, 2 and 4 were done on 2026-10-17 (see section 5 and ADR 0001). The
+order from here follows the ADR's action items: a spike for a second window and
+a JS popup menu, preferences in Rust, the window registry and single instance,
+then the ☰ menu, file watching and encodings.
 
 1. **Hands on test on the desktop** (Linux first). Things a virtual display
    could not show:
