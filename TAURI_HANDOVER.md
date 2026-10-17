@@ -346,6 +346,17 @@ target and retries briefly when Windows holds the file; a name typed without
 an extension in the save dialog gets ".md". Not done: owner preservation,
 UTF-32 BOM detection (as in Electron), files that do not exist yet.
 
+File watching, ADR step 6 part 2, checked on Xvfb: `src-tauri/src/watch.rs`
+watches the folder of every open file (so replace by rename is seen), waits
+until a file has been quiet for a second, and reports it only when its content
+differs from what MarkText last read or wrote; that keeps MarkText's own saves
+quiet without Electron's 1.3 s ignore window. The page loads the file and
+sends Electron's `mt::update-file` payloads, so the renderer behaves as before:
+an unmodified tab reloads silently, a modified one asks, a deleted file warns,
+and a recreated one asks again. Watches follow the window registry (open,
+save under a new name, close tab, close window). Hitting the OS watch limit
+shows Electron's "inotify limit reached" notice once.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -430,7 +441,7 @@ port. Unhandled channels are logged in debug builds (section 3).
 | ☰ menu: Cut, Copy, Paste; Open Folder, Preferences, pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
 | Sidebar, open folder, file tree | `mt::ask-for-open-project-in-sidebar`, `src/main/menu/actions/file.ts`, `src/main/filesystem/watcher.ts` |
-| Reload when a file changes on disk | `mt::update-file`, `src/main/filesystem/watcher.ts` (chokidar; Rust `notify` crate) |
+| File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |

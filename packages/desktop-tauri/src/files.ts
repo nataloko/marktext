@@ -3,9 +3,14 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
-import { boot, path } from './boot'
+import { appWindow, boot, path } from './boot'
 import { emitToRenderer } from './electron'
-import { loadMarkdownFile, writeMarkdownFile, type MarkdownOptions } from './markdown'
+import {
+  loadMarkdownFile,
+  writeMarkdownFile,
+  type LoadPreferences,
+  type MarkdownOptions
+} from './markdown'
 import { preferences, preferredEol } from './preferences'
 
 const MARKDOWN_EXTENSIONS = [
@@ -24,6 +29,13 @@ const MARKDOWN_EXTENSIONS = [
 const addRecentFile = (pathname: string): Promise<unknown> =>
   invoke('add_recent_file', { path: pathname })
 
+const loadPreferences = (): LoadPreferences => ({
+  preferredEol: preferredEol(),
+  autoGuessEncoding: preferences.autoGuessEncoding !== false,
+  trimTrailingNewline: Number(preferences.trimTrailingNewline ?? 2),
+  autoNormalizeLineEndings: !!preferences.autoNormalizeLineEndings
+})
+
 // packages/desktop/src/main/windows/editor.ts openTabsFromPaths and _doOpenTab.
 export const openTab = async(pathname: string, selected = true): Promise<void> => {
   if (!(await invoke<boolean>('window_add_file', { path: pathname }))) {
@@ -31,12 +43,7 @@ export const openTab = async(pathname: string, selected = true): Promise<void> =
     return
   }
   try {
-    const document = await loadMarkdownFile(pathname, {
-      preferredEol: preferredEol(),
-      autoGuessEncoding: preferences.autoGuessEncoding !== false,
-      trimTrailingNewline: Number(preferences.trimTrailingNewline ?? 2),
-      autoNormalizeLineEndings: !!preferences.autoNormalizeLineEndings
-    })
+    const document = await loadMarkdownFile(pathname, loadPreferences())
     void addRecentFile(pathname)
     emitToRenderer('mt::open-new-tab', document, {}, selected)
   } catch (err) {
@@ -112,3 +119,42 @@ export const saveTab = async(
     emitToRenderer('mt::tab-save-failure', id, String(err))
   }
 }
+
+interface FileEvent {
+  pathname: string
+  kind: 'add' | 'change' | 'unlink'
+  mtimeMs: number
+}
+
+// Outside changes to this window's files (src-tauri/src/watch.rs), sent to the
+// renderer as packages/desktop/src/main/filesystem/watcher.ts sends them.
+export const listenForFileChanges = (): Promise<unknown> =>
+  appWindow.listen<FileEvent>('mt::tauri::file-changed', async({ payload }) => {
+    const { pathname, kind, mtimeMs } = payload
+    if (kind === 'unlink') {
+      emitToRenderer('mt::update-file', { type: 'unlink', change: { pathname } })
+      return
+    }
+    try {
+      const data = await loadMarkdownFile(pathname, loadPreferences())
+      const change =
+        kind === 'add'
+          ? {
+            pathname,
+            name: path.basename(pathname),
+            isFile: true,
+            isDirectory: false,
+            mtimeMs,
+            isMarkdown: true,
+            data
+          }
+          : { pathname, data, mtimeMs }
+      emitToRenderer('mt::update-file', { type: kind, change })
+    } catch (err) {
+      emitToRenderer('mt::show-notification', {
+        title: 'Watcher I/O error',
+        type: 'error',
+        message: String(err)
+      })
+    }
+  })

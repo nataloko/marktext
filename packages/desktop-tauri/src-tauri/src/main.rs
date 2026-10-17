@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 mod encoding;
 mod preferences;
 mod recent;
+mod watch;
 mod windows;
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
@@ -170,8 +171,13 @@ struct LoadedText {
 // detect the encoding, decode. The page handles line endings and the trailing
 // newline (src/markdown.ts).
 #[tauri::command]
-fn read_markdown_file(path: String, auto_guess_encoding: bool) -> Result<LoadedText, String> {
+fn read_markdown_file(
+    watcher: tauri::State<'_, watch::FileWatcher>,
+    path: String,
+    auto_guess_encoding: bool,
+) -> Result<LoadedText, String> {
     let bytes = std::fs::read(&path).map_err(|err| format!("{path}: {err}"))?;
+    watcher.remember(&path, &bytes);
     let (encoding, is_bom) = encoding::guess(&bytes, auto_guess_encoding);
     let text = encoding::decode(&bytes, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
     Ok(LoadedText { text, encoding, is_bom })
@@ -179,9 +185,17 @@ fn read_markdown_file(path: String, auto_guess_encoding: bool) -> Result<LoadedT
 
 // markdown.ts writeMarkdownFile after the line endings are applied.
 #[tauri::command]
-fn write_markdown_file(path: String, text: String, encoding: String, is_bom: bool) -> Result<(), String> {
+fn write_markdown_file(
+    watcher: tauri::State<'_, watch::FileWatcher>,
+    path: String,
+    text: String,
+    encoding: String,
+    is_bom: bool,
+) -> Result<(), String> {
     let bytes = encoding::encode(&text, &encoding, is_bom).map_err(|err| format!("{path}: {err}"))?;
-    write_atomic(Path::new(&path), &bytes).map_err(|err| format!("{path}: {err}"))
+    write_atomic(Path::new(&path), &bytes).map_err(|err| format!("{path}: {err}"))?;
+    watcher.remember(&path, &bytes);
+    Ok(())
 }
 
 // Writes beside the target and renames over it, so a failed write never
@@ -354,7 +368,10 @@ fn main() {
             let Some(id) = windows::id_from_label(window.label()) else { return };
             match event {
                 tauri::WindowEvent::Focused(true) => window.state::<windows::Windows>().focus(id),
-                tauri::WindowEvent::Destroyed => window.state::<windows::Windows>().remove(id),
+                tauri::WindowEvent::Destroyed => {
+                    window.state::<windows::Windows>().remove(id);
+                    window.state::<watch::FileWatcher>().unwatch_window(id);
+                }
                 _ => {}
             }
         })
@@ -362,6 +379,7 @@ fn main() {
             let user_data = app.path().app_data_dir()?;
             app.manage(preferences::Preferences::load(user_data.join("preferences.json")));
             app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
+            app.manage(watch::FileWatcher::start(app.handle()));
             let cwd = std::env::current_dir().unwrap_or_default();
             let args: Vec<String> = std::env::args().skip(1).collect();
             open_editor_window(app.handle(), markdown_files(&cwd, &args))?;

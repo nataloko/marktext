@@ -238,5 +238,6 @@ To revisit:
 5. [x] ☰ menu in TS from the desktop menu templates, with recent files from Rust.
    Done in `29216094`; the templates and most actions run unchanged, with
    stand-ins for the main process modules they import.
-6. [ ] File watching and encodings in Rust.
+6. [x] File watching and encodings in Rust. Done in `657fc341` (encodings)
+   and the watcher commit after it; polling for network drives is still open.
 7. [x] Update `TAURI_HANDOVER.md` sections 3 and 8 once this is accepted.

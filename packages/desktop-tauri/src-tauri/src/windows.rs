@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::preferences::Preferences;
+use crate::watch::FileWatcher;
 
 // Asks one window's page to open files; the page listens on its own window.
 const OPEN_FILES_EVENT: &str = "mt::tauri::open-files";
@@ -207,37 +208,79 @@ fn editor_id(window: &WebviewWindow) -> Option<u32> {
     id_from_label(window.label())
 }
 
+// Messages Rust has for this window's renderer; the page passes them on.
+#[derive(Clone, serde::Serialize)]
+struct RendererMessage {
+    channel: &'static str,
+    args: Vec<serde_json::Value>,
+}
+
+// Watches a file this window opened, and tells the user once when the OS
+// limit on watches is reached (watcher.ts reports ENOSPC the same way).
+fn watch_file(window: &WebviewWindow, watcher: &FileWatcher, path: &str, id: u32) {
+    let Some(message) = watcher.watch(path, id) else { return };
+    let notification = RendererMessage {
+        channel: "mt::show-notification",
+        args: vec![serde_json::json!({ "title": "inotify limit reached", "type": "warning", "message": message })],
+    };
+    let _ = window.emit_to(window.label(), "mt::tauri::renderer-message", notification);
+}
+
 // Returns false when the window already has the file open, so the page
-// switches to its tab instead (editor.ts openTabsFromPaths).
+// switches to its tab instead (editor.ts openTabsFromPaths). Open files are
+// watched for outside changes (src/watch.rs).
 #[tauri::command]
-pub fn window_add_file(window: WebviewWindow, windows: State<'_, Windows>, path: String) -> bool {
+pub fn window_add_file(
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    watcher: State<'_, FileWatcher>,
+    path: String,
+) -> bool {
     let Some(id) = editor_id(&window) else { return false };
-    let mut registry = windows.lock();
-    let Some(editor) = registry.editors.get_mut(&id) else { return false };
-    if editor.opened_files.contains(&path) {
-        return false;
+    {
+        let mut registry = windows.lock();
+        let Some(editor) = registry.editors.get_mut(&id) else { return false };
+        if editor.opened_files.contains(&path) {
+            return false;
+        }
+        editor.opened_files.push(path.clone());
     }
-    editor.opened_files.push(path);
+    watch_file(&window, &watcher, &path, id);
     true
 }
 
 // After Save As or a rename (editor.ts changeOpenedFilePath).
 #[tauri::command]
-pub fn window_change_file(window: WebviewWindow, windows: State<'_, Windows>, old_path: String, path: String) {
+pub fn window_change_file(
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    watcher: State<'_, FileWatcher>,
+    old_path: String,
+    path: String,
+) {
     let Some(id) = editor_id(&window) else { return };
-    let mut registry = windows.lock();
-    if let Some(editor) = registry.editors.get_mut(&id) {
+    {
+        let mut registry = windows.lock();
+        let Some(editor) = registry.editors.get_mut(&id) else { return };
         editor.opened_files.retain(|open| *open != old_path && *open != path);
-        editor.opened_files.push(path);
+        editor.opened_files.push(path.clone());
     }
+    watcher.unwatch(&old_path, id);
+    watch_file(&window, &watcher, &path, id);
 }
 
 #[tauri::command]
-pub fn window_remove_file(window: WebviewWindow, windows: State<'_, Windows>, path: String) {
+pub fn window_remove_file(
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    watcher: State<'_, FileWatcher>,
+    path: String,
+) {
     let Some(id) = editor_id(&window) else { return };
     if let Some(editor) = windows.lock().editors.get_mut(&id) {
         editor.opened_files.retain(|open| *open != path);
     }
+    watcher.unwatch(&path, id);
 }
 
 // The page now listens for files to open; returns the ones that waited.

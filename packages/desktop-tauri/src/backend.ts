@@ -11,7 +11,14 @@ import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import { registerMenuHandlers } from './appMenu'
 import { appWindow, boot, isWindows } from './boot'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
-import { openTab, openTabs, saveTab, showOpenDialog, type SaveRequest } from './files'
+import {
+  listenForFileChanges,
+  openTab,
+  openTabs,
+  saveTab,
+  showOpenDialog,
+  type SaveRequest
+} from './files'
 import { popupMenu } from './menu'
 import {
   forRenderer,
@@ -300,6 +307,13 @@ const registerHandlers = (): void => {
 // open after the window's own files, in the order they arrive.
 let opening: Promise<void> = Promise.resolve()
 
+// Messages Rust addresses to this window's renderer.
+const listenForRendererMessages = (): Promise<unknown> =>
+  appWindow.listen<{ channel: string; args: unknown[] }>(
+    'mt::tauri::renderer-message',
+    ({ payload }) => emitToRenderer(payload.channel, ...payload.args)
+  )
+
 const listenForFiles = (): Promise<unknown> =>
   appWindow.listen<string[]>('mt::tauri::open-files', ({ payload }) => {
     opening = opening.then(() => openTabs(payload))
@@ -331,6 +345,8 @@ export const startBackend = async(): Promise<void> => {
   setWindowUrlParams()
   installShortcuts(keybindings, runCommand)
   await installWindowEvents()
+  await listenForRendererMessages()
+  await listenForFileChanges()
   await listenForFiles()
   opening = bootEditor()
 }
