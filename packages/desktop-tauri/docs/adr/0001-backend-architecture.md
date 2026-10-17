@@ -103,9 +103,15 @@ TypeScript in each window (`packages/desktop-tauri/src`, growing from
 
 Rules for the boundary:
 
-- Rust commands work at the level of Electron's channels (open this file, save
-  this document, set these preferences), not as general file system access, so a
-  page can do no more than Electron's renderer could.
+- A page may do no more than Electron's renderer could. Note that this is
+  already a lot: the preload gives the renderer general file access
+  (`mt::fs::read-file`, `write-file`, `unlink`, `move`, `copy`, `readdir`,
+  `preload/index.ts:162-177`, handled without path checks in
+  `main/ipc/fs.ts:46-75`) and `shell.openPath` on any path. Commands for shared
+  state and app logic still work at the level of a task (set these
+  preferences, this window opened this file), not as raw building blocks.
+  (Corrected 2026-10-17: the first version assumed Electron's channels were
+  narrow.)
 - Events that Rust sends straight to the renderer reuse Electron's channel
   names, so `electron.ts` can deliver them unchanged.
 - Per window constants (boot info, window id, files to open) go in
@@ -199,7 +205,7 @@ Harder:
 
 - contributors need both TypeScript and Rust
 - about a third of upstream main process changes need translating into Rust
-- the boundary needs discipline to stay at channel level
+- the boundary needs discipline to stay at task level
 
 To revisit:
 
@@ -209,6 +215,10 @@ To revisit:
   own decisions
 - per window permissions, once windows have distinct roles (the settings window
   does not need to write documents)
+- going further than Electron, for example limiting file writes to paths the
+  user opened or picked; it would shrink what a script injected through a
+  document could do, but needs care with images and exports, so it is its own
+  security decision
 
 ## Action items
 
@@ -221,8 +231,10 @@ To revisit:
 3. [x] Window registry and single instance: per window open file lists, opening a
    second launch's files in the best window, a new window command. Done in
    `d2c1ad43`; folders wait for the sidebar.
-4. [ ] Review the trial's general commands (`read_text_file`, `write_text_file`,
-   the `opener` path scope) against the boundary rule and narrow them.
+4. [x] Review the trial's general commands (`read_text_file`, `write_text_file`,
+   the `opener` path scope) against the boundary rule and narrow them. Nothing
+   to narrow: they are a subset of Electron's `mt::fs::*` and `shell.openPath`;
+   see the corrected rule above.
 5. [ ] ☰ menu in TS from the desktop menu templates, with recent files from Rust.
 6. [ ] File watching and encodings in Rust.
 7. [x] Update `TAURI_HANDOVER.md` sections 3 and 8 once this is accepted.
