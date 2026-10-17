@@ -63,7 +63,8 @@ const LEGACY: &[(&str, &str)] = &[
 
 fn legacy_encoding(name: &str) -> Option<&'static Encoding> {
     let label = LEGACY.iter().find(|(iconv, _)| *iconv == name).map_or(name, |(_, label)| *label);
-    Encoding::for_label(label.as_bytes())
+    // Some labels ("utf-16", "iso-2022-kr") decode one encoding and encode another.
+    Encoding::for_label(label.as_bytes()).filter(|encoding| encoding.output_encoding() == *encoding)
 }
 
 fn iconv_name(encoding: &'static Encoding) -> String {
@@ -135,7 +136,10 @@ pub fn decode(bytes: &[u8], name: &str, is_bom: bool) -> Result<String, String> 
         _ => {
             let encoding = legacy_encoding(name).ok_or_else(|| unsupported(name))?;
             let (text, had_errors) = encoding.decode_without_bom_handling(body);
-            (!had_errors).then(|| text.into_owned())
+            // Some byte sequences decode to text that encodes back differently
+            // (GBK A2 E3 is "€", which GBK writes as 80); refuse those too.
+            let round_trips = !had_errors && encode(&text, name, false).is_ok_and(|bytes| bytes == body);
+            round_trips.then(|| text.into_owned())
         }
     };
     text.ok_or_else(|| {
@@ -224,6 +228,20 @@ mod tests {
         }
         let bytes = encode("中文", "gbk", false).unwrap();
         assert_eq!(decode(&bytes, "gbk", false).unwrap(), "中文");
+    }
+
+    #[test]
+    fn bytes_that_would_change_on_save_are_refused() {
+        // encoding_rs decodes these but encodes the result differently.
+        for (bytes, name) in [
+            (&[0xa2, 0xe3][..], "gbk"),
+            (&[0x80][..], "gb18030"),
+            (&[0xed, 0x40][..], "shiftjis"),
+            (&[0xa2, 0xcc][..], "big5"),
+            (&[0x8f, 0xb0, 0xa1][..], "eucjp"),
+        ] {
+            assert!(decode(bytes, name, false).is_err(), "{name} {bytes:x?}");
+        }
     }
 
     #[test]
