@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
 const MARKDOWN_EXTENSIONS: [&str; 11] = [
@@ -24,7 +25,8 @@ struct BootPaths {
 }
 
 // The `BootInfo` type in packages/desktop/src/shared/types/ipc.ts, plus the
-// files to open, which Electron's main process would send as tabs instead.
+// window's id and the files to open, which Electron's main process would
+// send as tabs instead.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BootInfo {
@@ -36,8 +38,12 @@ struct BootInfo {
     is_updatable: bool,
     #[serde(rename = "MARKDOWN_INCLUSIONS")]
     markdown_inclusions: Vec<String>,
+    window_id: u32,
     open_files: Vec<String>,
 }
+
+// Electron's BrowserWindow ids start at 1 and are never reused.
+static NEXT_WINDOW_ID: AtomicU32 = AtomicU32::new(1);
 
 // The renderer compares against Node's `process.platform` and `process.arch` names.
 fn node_platform() -> &'static str {
@@ -69,7 +75,7 @@ fn files_from_command_line(cwd: &Path) -> Vec<String> {
         .collect()
 }
 
-fn boot_info(app: &tauri::App, user_data: &Path) -> BootInfo {
+fn boot_info(app: &AppHandle, user_data: &Path, window_id: u32, open_files: Vec<String>) -> BootInfo {
     let cwd = std::env::current_dir().unwrap_or_default();
     let version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -100,7 +106,8 @@ fn boot_info(app: &tauri::App, user_data: &Path) -> BootInfo {
         },
         is_updatable: false,
         markdown_inclusions: MARKDOWN_EXTENSIONS.iter().map(|ext| format!("*.{ext}")).collect(),
-        open_files: files_from_command_line(&cwd),
+        window_id,
+        open_files,
     }
 }
 
@@ -145,6 +152,52 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
+// One editor window with its own boot info (packages/desktop/src/main/windows/editor.ts).
+fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
+    let user_data = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&user_data)?;
+    let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
+    let script = format!(
+        "window.__MT_BOOT__ = {};",
+        serde_json::to_string(&boot_info(app, &user_data, window_id, open_files))?
+    );
+
+    // No system title bar: the renderer draws its own (titleBarStyle "custom").
+    // The native drag and drop handler would swallow HTML drop events
+    // that the editor relies on.
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        format!("editor-{window_id}"),
+        tauri::WebviewUrl::default(),
+    )
+    .title("MarkText")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(400.0, 300.0)
+    .decorations(false)
+    .disable_drag_drop_handler()
+    .initialization_script(script)
+    .build()?;
+
+    // Debug builds print the page console, including script load
+    // errors, to the terminal.
+    #[cfg(all(debug_assertions, target_os = "linux"))]
+    window.with_webview(|webview| {
+        use webkit2gtk::{SettingsExt, WebViewExt};
+        if let Some(settings) = webview.inner().settings() {
+            settings.set_enable_write_console_messages_to_stdout(true);
+        }
+    })?;
+    #[cfg(not(all(debug_assertions, target_os = "linux")))]
+    let _ = window;
+    Ok(())
+}
+
+// Async because building a window inside a synchronous command deadlocks on Windows.
+#[tauri::command]
+async fn new_editor_window(app: AppHandle, files: Vec<String>) -> Result<(), String> {
+    open_editor_window(&app, files).map_err(|err| err.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -153,39 +206,12 @@ fn main() {
             read_text_file,
             write_text_file,
             path_exists,
-            toggle_devtools
+            toggle_devtools,
+            new_editor_window
         ])
         .setup(|app| {
-            let user_data = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&user_data)?;
-            let script = format!(
-                "window.__MT_BOOT__ = {};",
-                serde_json::to_string(&boot_info(app, &user_data))?
-            );
-
-            // No system title bar: the renderer draws its own (titleBarStyle "custom").
-            // The native drag and drop handler would swallow HTML drop events
-            // that the editor relies on.
-            let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                .title("MarkText")
-                .inner_size(1200.0, 800.0)
-                .min_inner_size(400.0, 300.0)
-                .decorations(false)
-                .disable_drag_drop_handler()
-                .initialization_script(script)
-                .build()?;
-
-            // Debug builds print the page console, including script load
-            // errors, to the terminal.
-            #[cfg(all(debug_assertions, target_os = "linux"))]
-            window.with_webview(|webview| {
-                use webkit2gtk::{SettingsExt, WebViewExt};
-                if let Some(settings) = webview.inner().settings() {
-                    settings.set_enable_write_console_messages_to_stdout(true);
-                }
-            })?;
-            #[cfg(not(all(debug_assertions, target_os = "linux")))]
-            let _ = window;
+            let cwd = std::env::current_dir().unwrap_or_default();
+            open_editor_window(app.handle(), files_from_command_line(&cwd))?;
             Ok(())
         })
         .run(tauri::generate_context!())

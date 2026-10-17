@@ -10,13 +10,16 @@ import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { createPlatformPath } from 'common/filesystem/platformPath'
 import type { BootInfo } from '@shared/types/ipc'
+import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import defaultPreferences from '../../desktop/static/preference.json'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
 import { loadMarkdownFile, writeMarkdownFile, type MarkdownOptions } from './markdown'
+import { popupMenu } from './menu'
 import { defaultKeybindings, installShortcuts } from './shortcuts'
 
 interface TauriBootInfo extends BootInfo {
-  // Absolute paths given on the command line.
+  windowId: number
+  // Absolute paths to open in this window.
   openFiles: string[]
 }
 
@@ -92,7 +95,7 @@ const setWindowUrlParams = (): void => {
   const params = new URLSearchParams({
     udp: boot.paths.userData,
     debug: import.meta.env.DEV ? '1' : '0',
-    wid: '1',
+    wid: String(boot.windowId),
     type: 'editor',
     cff: String(preferences.codeFontFamily ?? ''),
     cfs: String(preferences.codeFontSize),
@@ -183,6 +186,8 @@ const setFullscreen = async(flag: boolean): Promise<void> => {
   isFullscreen = flag
   emitToRenderer(flag ? 'mt::window-enter-full-screen' : 'mt::window-leave-full-screen')
 }
+
+const newWindow = (): Promise<unknown> => invoke('new_editor_window', { files: [] })
 
 const closeWindow = async(): Promise<void> => {
   await appWindow.destroy()
@@ -308,6 +313,9 @@ const runCommand = (id: string): boolean => {
     emitToRenderer('mt::switch-tab-by-index', TAB_INDEX.indexOf(id.slice(13)))
   } else {
     switch (id) {
+      case 'file.new-window':
+        void newWindow()
+        break
       case 'file.new-tab':
         emitToRenderer('mt::new-untitled-tab')
         emitToRenderer('mt::set-view-layout', { showTabBar: true })
@@ -373,6 +381,51 @@ const runCommand = (id: string): boolean => {
   return true
 }
 
+// ---- menus -----------------------------------------------------------------
+
+// Placeholder for the ☰ menu until it is built from the desktop menu templates
+// (packages/desktop/src/main/menu/templates).
+const applicationMenu = (): MenuTemplate => {
+  const item = (id: string, label: string) => ({ id, label, accelerator: keybindings.get(id) })
+  return [
+    item('file.new-tab', 'New Tab'),
+    item('file.new-window', 'New Window'),
+    item('file.open-file', 'Open File...'),
+    { type: 'separator' },
+    item('file.save', 'Save'),
+    item('file.save-as', 'Save As...'),
+    { type: 'separator' },
+    {
+      label: 'View',
+      submenu: [
+        item('view.command-palette', 'Command Palette...'),
+        item('view.source-code-mode', 'Source Code Mode'),
+        item('view.typewriter-mode', 'Typewriter Mode'),
+        item('view.focus-mode', 'Focus Mode'),
+        item('view.toggle-sidebar', 'Toggle Sidebar'),
+        item('view.toggle-tabbar', 'Toggle Tab Bar')
+      ]
+    },
+    { type: 'separator' },
+    item('file.close-window', 'Close Window')
+  ]
+}
+
+const menuPrefix = `${appWindow.label}:`
+
+// Renderer context menus (contextMenu/popupMenu.ts) wait for a click and then
+// for mt::menu::closed. GTK reports no dismissal without a pick, so closed
+// only follows a click; a dismissed popup's listeners stay registered but
+// never match the ids of a later popup.
+const showRendererMenu = (template: MenuTemplate, position?: MenuPopupPosition) =>
+  popupMenu(template, position, menuPrefix, (id) => {
+    emitToRenderer('mt::menu::click', { windowId: boot.windowId, id })
+    emitToRenderer('mt::menu::closed', { windowId: boot.windowId })
+  })
+
+const showApplicationMenu = (position?: MenuPopupPosition) =>
+  popupMenu(applicationMenu(), position, `${menuPrefix}app:`, (id) => runCommand(id))
+
 // ---- channel handlers ------------------------------------------------------
 
 const registerHandlers = (): void => {
@@ -400,6 +453,7 @@ const registerHandlers = (): void => {
   )
 
   onSend('mt::cmd-open-file', showOpenDialog)
+  onSend('mt::cmd-new-editor-window', newWindow)
   onSend('mt::response-file-save', (...args: SaveRequest) => saveTab(false, ...args))
   onSend('mt::response-file-save-as', (...args: SaveRequest) => saveTab(true, ...args))
 
@@ -420,6 +474,8 @@ const registerHandlers = (): void => {
   onSend('mt::win::toggle-fullscreen', () => setFullscreen(!isFullscreen))
   onInvoke('mt::win::is-maximized', () => appWindow.isMaximized())
   onInvoke('mt::win::is-fullscreen', () => appWindow.isFullscreen())
+  onSend('mt::menu::popup', showRendererMenu)
+  onSend('mt::menu::popup-application', showApplicationMenu)
 
   onSend('mt::shell::show-item', (fullPath: string) => revealItemInDir(fullPath))
   onInvoke('mt::shell::open-external', (url: string) => openUrl(url))
