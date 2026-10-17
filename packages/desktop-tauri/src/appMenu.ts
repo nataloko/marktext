@@ -151,12 +151,9 @@ const setAlwaysOnTop = (menu: ElectronMenu, flag: boolean): void => {
 // ---- showing it -----------------------------------------------------------------
 
 // Cut, copy and paste have no click handler in the templates; Electron runs
-// them on the focused page.
-const ROLES: Record<string, 'Cut' | 'Copy' | 'Paste'> = {
-  cut: 'Cut',
-  copy: 'Copy',
-  paste: 'Paste'
-}
+// them on the focused page. GTK's own Cut, Copy and Paste items do not reach
+// the page, so these ask the webview directly (main.rs editing_command).
+const EDITING_ROLES = new Set(['cut', 'copy', 'paste'])
 
 // Tauri rejects Electron's "Plus" and characters typed with Shift such as "_".
 // Those items show no shortcut; in a popup the shortcut is only a label.
@@ -208,18 +205,16 @@ const toTauriItems = (items: ModelItem[]): ItemOptions[] => {
       result.push({ text, enabled: item.enabled, items: toTauriItems(item.submenu.items) })
       continue
     }
-    const role = item.role ? ROLES[item.role] : undefined
-    if (role && !item.click) {
-      result.push({ item: role, text })
-      continue
-    }
+    const editingRole = item.role && !item.click && EDITING_ROLES.has(item.role) ? item.role : ''
     const options = {
       // Tauri routes clicks by id across all windows.
       id: `${appWindow.label}:app:${nextItemId++}`,
       text,
       enabled: item.enabled,
       accelerator: tauriAccelerator(item.accelerator),
-      action: () => clicked(item, items)
+      action: editingRole
+        ? () => void invoke('editing_command', { command: editingRole })
+        : () => clicked(item, items)
     }
     result.push(
       item.type === 'checkbox' || item.type === 'radio'

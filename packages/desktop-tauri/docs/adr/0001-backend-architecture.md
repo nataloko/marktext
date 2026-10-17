@@ -237,7 +237,6 @@ To revisit:
    see the corrected rule above.
 5. [x] ☰ menu in TS from the desktop menu templates, with recent files from Rust.
    Done in `29216094`; the templates and most actions run unchanged, with
-   stand-ins for the main process modules they import. Edit menu Cut, Copy and
-   Paste still to fix (see the handover).
+   stand-ins for the main process modules they import.
 6. [ ] File watching and encodings in Rust.
 7. [x] Update `TAURI_HANDOVER.md` sections 3 and 8 once this is accepted.

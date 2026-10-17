@@ -318,11 +318,12 @@ Rust's `recently-used-documents.json`). Quit now closes every window, each
 asking about its own unsaved documents. Not available yet, with a notice:
 Open Folder, Preferences, pandoc import and export, Check for Updates.
 Known problems:
-- Cut, Copy and Paste in the Edit menu do nothing: they are GTK's built in
-  items, which do not act on the WebKit page (the keyboard shortcuts work).
-  Planned fix: a Rust command that runs WebKitGTK's editing command, the
-  counterpart of Electron's `webContents.copy()`; Windows needs checking.
-- Only GTK's built in items show shortcut labels in the popup.
+- Cut, Copy and Paste in the Edit menu first did nothing: GTK's built in items
+  do not act on the WebKit page. Fixed by `main.rs editing_command`, which runs
+  WebKitGTK's editing command (the counterpart of Electron's
+  `webContents.copy()`); checked on Xvfb. On Windows it runs
+  `document.execCommand`, untested; WebView2 may refuse a paste there.
+- The popup shows no shortcut labels (only GTK's built in items did).
 - On Xvfb, once, a reopened menu only appeared after the next key press; not
   reproduced in reruns. Xvfb has no window manager, so check on a desktop.
 - Once, the app closed without any log line after a long session in source

@@ -239,6 +239,30 @@ pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> ta
     Ok(())
 }
 
+// Electron's webContents.cut/copy/paste for the Edit menu: the page gets the
+// same clipboard events as from the keyboard shortcuts.
+#[tauri::command]
+fn editing_command(window: tauri::WebviewWindow, command: String) -> Result<(), String> {
+    let command = match command.as_str() {
+        "cut" => "Cut",
+        "copy" => "Copy",
+        "paste" => "Paste",
+        other => return Err(format!("unknown editing command {other}")),
+    };
+    #[cfg(target_os = "linux")]
+    return window
+        .with_webview(move |webview| {
+            use webkit2gtk::WebViewExt;
+            webview.inner().execute_editing_command(command);
+        })
+        .map_err(|err| err.to_string());
+    // Untested: WebView2 may refuse a paste that no key press started.
+    #[cfg(not(target_os = "linux"))]
+    return window
+        .eval(format!("document.execCommand('{}')", command.to_lowercase()))
+        .map_err(|err| err.to_string());
+}
+
 // Electron's app.quit: every window gets a close request, so each one asks
 // about its own unsaved documents.
 #[tauri::command]
@@ -268,6 +292,7 @@ fn main() {
             path_exists,
             toggle_devtools,
             new_editor_window,
+            editing_command,
             quit_app,
             preferences::get_preferences,
             preferences::set_preferences,
