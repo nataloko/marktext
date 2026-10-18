@@ -832,7 +832,10 @@ from the server itself. The viewer's save dialog, `mt::dialog::show-save`,
 was not answered at all before. Checked on Xvfb: pasting `https://example.com/`
 gives `[Example Domain](https://example.com/)`; a PlantUML diagram's Copy puts
 the server's PNG on the clipboard, and Save SVG writes the server's SVG and
-shows the success notice.
+shows the success notice. Checked in the Windows VM (a local MinGW build of
+`6711e4ae`): the same pasted link title over HTTPS (Windows' certificate
+store), and Save PNG writing the server's PNG through the "Save diagram"
+dialog with the success notice.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
