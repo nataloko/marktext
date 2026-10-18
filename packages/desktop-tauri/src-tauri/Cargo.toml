@@ -43,3 +43,8 @@ gtk = "0.18"
 webview2-com = "0.39"
 windows-core = "0.62"
 clipboard-win = "5"
+# Decodes a copied image into the bitmaps the clipboard takes (src/clipboard.rs).
+png = "0.18"
+
+[dev-dependencies]
+png = "0.18"

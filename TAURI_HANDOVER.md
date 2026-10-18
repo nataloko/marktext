@@ -725,6 +725,27 @@ all display, and so does a newly pasted image. Blocks Muya re-renders through
 the image then loads. Nothing reads an image's `src` back as a path (only the
 PlantUML export reads `src`, and those are web addresses).
 
+Image drops, Copy Image, image path completion (2026-10-18). Dropping a
+single image onto the editor puts the caret at the drop point and sends the
+path as `mt::screenshot-captured`, the renderer's hook for macOS screenshots,
+which inserts it through `imageAction`, so the Image settings apply (Electron's
+Muya inserts it as its own paragraph next to the block; here it goes in at the
+caret). Linux decides from the path Rust sent during the hover; Windows by the
+file name's extension, then waits for the path from Rust. The diagram viewer's
+Copy (`mt::clipboard::write-image`) puts the PNG on the clipboard from Rust: a
+GdkPixbuf on GTK's clipboard on Linux; on Windows the registered "PNG" format
+plus CF_DIBV5 and CF_DIB decoded with the `png` crate. Image path completion
+(`mt::ask-for-image-auto-path`) lists folders and images through Rust and
+filters them with the same fuzzaldrin call as Electron (no cache or folder
+watching). Checked on Xvfb: an image dropped at the end of a line goes in there
+and is copied to the image folder, `./` in the image box lists the folder's
+images and subfolders, and Copy in the diagram viewer leaves an `image/png` of
+the diagram on the clipboard. Local images on Windows: the asset protocol
+works for normal drives (a picture on C: displays), but Tauri resolves each
+path before checking the scope (`std::fs::canonicalize`), which fails on some
+drives, such as the VM's shared folder, so images there show "Load image
+failed" (403). A protocol of our own that skips that step would fix it.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -810,7 +831,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
-| Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`; a drop needs the path at once (Muya `dragDropImage.ts` calls `getPathForFile`), which only Linux can give, from `src-tauri/src/drop.rs` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Settings pages: fonts list, pandoc and command detection (`mt::cmd::exists`, needed for PicGo too) | `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |

@@ -8,14 +8,17 @@
 // Windows: the renderer's drop handler runs but gets empty paths. The dropped
 // files go to Rust first, and `mt::window::drop` waits for their paths.
 //
-// Dropped images and folders are not handled.
+// One image dropped onto the document is inserted where it was dropped, which
+// Muya does in Electron (muya/src/editor/dragDropImage.ts) with the path it
+// cannot get here. Dropped folders are not handled.
 
 import { invoke } from '@tauri-apps/api/core'
 import { appWindow, boot, isWindows } from './boot'
-import { onSend } from './electron'
+import { emitToRenderer, onSend } from './electron'
 import { openFileOrFolder } from './folders'
 import { PANDOC_EXTENSIONS } from './stand-ins/main/config'
 import { notAvailable } from './stand-ins/notAvailable'
+import { IMAGE_EXTENSIONS } from './userData'
 
 interface WebView2Host {
   postMessageWithAdditionalObjects?: (message: string, objects: FileList) => void
@@ -42,6 +45,51 @@ const openDropped = async(paths: string[]): Promise<void> => {
       break
     }
   }
+}
+
+// The document a drop landed on, null for a drop elsewhere or onto the source
+// code editor.
+const documentAt = (e: DragEvent): HTMLElement | null =>
+  e.target instanceof Element ? e.target.closest<HTMLElement>('.mu-editor') : null
+
+// Muya draws a drop marker for an image dragged over the document and removes
+// it when the drag leaves the page (muya dragDropImage.ts).
+const clearDropMarker = (): void => {
+  document.dispatchEvent(new Event('dragleave'))
+}
+
+// The caret goes to the drop point and the renderer's screenshot hook inserts
+// the image there, through the Image settings as a paste does
+// (renderer editor.vue handleScreenShot). Muya in Electron inserts a dropped
+// image as a paragraph of its own above or below the block instead. False
+// when the file is not an image.
+const insertImage = async(
+  editor: HTMLElement,
+  x: number,
+  y: number,
+  pathname: string
+): Promise<boolean> => {
+  if (!(await invoke<boolean>('paths_is_image', { path: pathname }))) return false
+  const range = document.caretRangeFromPoint(x, y)
+  editor.focus({ preventScroll: true })
+  if (range && editor.contains(range.startContainer)) {
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }
+  emitToRenderer('mt::screenshot-captured', pathname)
+  return true
+}
+
+const openOrInsert = async(
+  paths: string[],
+  editor: HTMLElement | null,
+  x: number,
+  y: number
+): Promise<void> => {
+  if (paths.length === 1 && editor && (await insertImage(editor, x, y, paths[0]))) return
+  await openDropped(paths)
 }
 
 // ---- Linux -------------------------------------------------------------------
@@ -71,12 +119,11 @@ const takeDrops = (): void => {
       e.preventDefault()
       // The editor would insert the file's URI as a link.
       e.stopImmediatePropagation()
-      // Clears the drop marker the editor drew before the paths arrived; it
-      // removes it when the drag leaves the page (muya dragDropImage.ts).
-      document.dispatchEvent(new Event('dragleave'))
+      // The editor may have drawn its drop marker before the paths arrived.
+      clearDropMarker()
       const paths = dragFiles
       dragFiles = []
-      void openDropped(paths)
+      void openOrInsert(paths, documentAt(e), e.clientX, e.clientY)
     },
     true
   )
@@ -88,7 +135,12 @@ let latestDrop = 0
 let pendingPaths: Promise<string[]> | null = null
 let resolvePending: ((paths: string[]) => void) | null = null
 
-// Runs before the renderer's own drop handler, which then sends mt::window::drop.
+const hasImageExtension = (name: string): boolean =>
+  IMAGE_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(`.${ext}`))
+
+// Runs before the renderer's own drop handler, which then sends
+// mt::window::drop, and before Muya's, which would insert nothing for an image
+// without its path.
 const postDrops = (): void => {
   window.addEventListener(
     'drop',
@@ -96,14 +148,29 @@ const postDrops = (): void => {
       const files = e.dataTransfer?.files
       const host = window.chrome?.webview
       if (!files?.length || !host?.postMessageWithAdditionalObjects) return
+      // Decided before the path is known, so by the name.
+      const editor = files.length === 1 && hasImageExtension(files[0].name) ? documentAt(e) : null
+      if (editor) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        clearDropMarker()
+      }
       const id = ++latestDrop
       resolvePending?.([])
-      pendingPaths = new Promise((resolve) => {
+      const paths = new Promise<string[]>((resolve) => {
         resolvePending = resolve
         setTimeout(() => resolve([]), DROP_WAIT_MS)
       })
       // A string, or Rust never sees it (src-tauri/src/drop.rs).
       host.postMessageWithAdditionalObjects(`mt-file-drop:${id}`, files)
+      if (!editor) {
+        pendingPaths = paths
+        return
+      }
+      const { clientX, clientY } = e
+      void paths.then(async(dropped) => {
+        if (dropped.length === 1) await insertImage(editor, clientX, clientY, dropped[0])
+      })
     },
     true
   )

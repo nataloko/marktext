@@ -2199,6 +2199,7 @@ dependencies = [
  "gtk",
  "ignore",
  "notify",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "sha1",

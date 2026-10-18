@@ -595,7 +595,9 @@ fn main() {
             search::search_cancel,
             keybindings::read_user_keybindings,
             keybindings::write_user_keybindings,
-            keybindings::ensure_keybindings_file
+            keybindings::ensure_keybindings_file,
+            clipboard::clipboard_write_image,
+            fileops::image_path_entries
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())

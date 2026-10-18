@@ -10,7 +10,7 @@
 use std::io::{Error, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use tauri::{State, WebviewWindow};
 
@@ -254,6 +254,51 @@ pub fn paths_is_image(path: String) -> bool {
     IMAGE_EXTENSIONS.contains(&ext.as_str()) && fs_is_file(path)
 }
 
+// main/config.ts BLACK_LIST.
+const IGNORED_NAMES: [&str; 1] = ["$RECYCLE.BIN"];
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ImagePathEntry {
+    file: String,
+    // "directory" or "image".
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
+// main/utils/imagePathAutoComplement.ts filesHandler: the folders and image
+// files in `dir`, for completing an image path as it is typed (the page
+// filters them by what was typed). Links are skipped, as Electron's lstat
+// checks skip them. Electron caches each listing and watches the folder; one
+// readdir per keystroke is cheap enough to do without.
+#[tauri::command]
+pub async fn image_path_entries(dir: String) -> Result<Vec<ImagePathEntry>, String> {
+    let entries = std::fs::read_dir(&dir).map_err(failed(&dir))?;
+    Ok(entries.filter_map(|entry| image_path_entry(&entry.ok()?)).collect())
+}
+
+fn image_path_entry(entry: &std::fs::DirEntry) -> Option<ImagePathEntry> {
+    let file = entry.file_name().to_string_lossy().into_owned();
+    if IGNORED_NAMES.contains(&file.as_str()) {
+        return None;
+    }
+    let file_type = entry.file_type().ok()?;
+    let kind = if file_type.is_dir() {
+        "directory"
+    } else if file_type.is_file() && ends_with_image_extension(&file) {
+        "image"
+    } else {
+        return None;
+    };
+    Some(ImagePathEntry { file, kind })
+}
+
+// Electron's IMAGE_REG matches the extension at the end of the name without
+// a dot, so "screenpng" counts too.
+fn ends_with_image_extension(name: &str) -> bool {
+    let name = name.to_lowercase();
+    IMAGE_EXTENSIONS.iter().any(|ext| name.ends_with(ext))
+}
+
 // Node's path.extname: from the last dot of the file name, but not for a name
 // that only starts with a dot.
 fn node_extname(path: &str) -> &str {
@@ -473,5 +518,37 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         assert!(copy_with_content_hash(&dir.join("missing.png"), &out).is_err());
         assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn image_paths_list_folders_and_images_only() {
+        let dir = temp_dir("image-paths");
+        for folder in ["assets", "$RECYCLE.BIN", "pics.png"] {
+            std::fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        for file in ["a.png", "B.JPEG", "c.webp", "screenpng", "notes.md", "d.png.txt", ".hidden.gif"] {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("a.png", dir.join("link.png")).unwrap();
+
+        let mut entries =
+            tauri::async_runtime::block_on(image_path_entries(crate::display(&dir))).unwrap();
+        entries.sort_by(|a, b| a.file.cmp(&b.file));
+        let entry = |file: &str, kind| ImagePathEntry { file: file.into(), kind };
+        assert_eq!(
+            entries,
+            [
+                entry(".hidden.gif", "image"),
+                entry("B.JPEG", "image"),
+                entry("a.png", "image"),
+                entry("assets", "directory"),
+                entry("c.webp", "image"),
+                entry("pics.png", "directory"),
+                entry("screenpng", "image"),
+            ]
+        );
+        assert_eq!(serde_json::to_value(&entries[3]).unwrap(), serde_json::json!({ "file": "assets", "type": "directory" }));
+        assert!(tauri::async_runtime::block_on(image_path_entries(crate::display(&dir.join("missing")))).is_err());
     }
 }

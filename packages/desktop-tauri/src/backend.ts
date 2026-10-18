@@ -333,6 +333,10 @@ const registerHandlers = (): void => {
   onInvoke('mt::shell::open-path', (fullPath: string) => openPath(fullPath))
   onSend('mt::clipboard::write-text', (text: string) => invoke('clipboard_write_text', { text }))
   onInvoke('mt::clipboard::read-text', () => invoke<string>('clipboard_read_text'))
+  // A Uint8Array would reach Rust as a JSON object, not a list of bytes.
+  onInvoke('mt::clipboard::write-image', (png: Uint8Array) =>
+    invoke<boolean>('clipboard_write_image', { png: Array.from(png) })
+  )
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
