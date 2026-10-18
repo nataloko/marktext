@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+mod drop;
 mod encoding;
 mod fileops;
 mod folders;
@@ -342,7 +343,8 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
 // The parts every window shares: its boot info, available before any page
 // script runs, and no system title bar, since the renderer draws its own
 // (titleBarStyle "custom"). The native drag and drop handler would swallow
-// HTML drop events that the editor relies on.
+// HTML drop events that the editor relies on. Only the app's own pages may
+// load in a window.
 fn window_builder<'a>(
     app: &'a AppHandle,
     label: String,
@@ -356,10 +358,12 @@ fn window_builder<'a>(
     std::fs::create_dir_all(&user_data)?;
     let boot = boot_info(app, &user_data, window_id, window_type, category, open_files, open_folder);
     let script = format!("window.__MT_BOOT__ = {};", serde_json::to_string(&boot)?);
+    let dev_url = if cfg!(debug_assertions) { app.config().build.dev_url.clone() } else { None };
     Ok(tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
         .title("MarkText")
         .decorations(false)
         .disable_drag_drop_handler()
+        .on_navigation(move |url| drop::is_app_page(url, dev_url.as_ref()))
         .initialization_script(script))
 }
 
@@ -393,6 +397,7 @@ pub(crate) fn open_editor_window(
         .min_inner_size(400.0, 300.0)
         .build()
         .inspect_err(|_| registry.remove(window_id))?;
+    drop::attach(&window);
     print_console_messages(&window)
 }
 
@@ -495,6 +500,7 @@ fn main() {
             resolve_path,
             path_exists,
             is_directory,
+            drop::is_markdown_file,
             fileops::fs_is_file,
             fileops::fs_is_directory,
             fileops::fs_is_executable,

@@ -543,6 +543,27 @@ Electron (electron-localshortcut) as in the page. The trial has no print yet,
 so WebView2's own print dialog opens. Worth raising upstream, as the command
 palette shows Ctrl+P next to Quick Open.
 
+Files dropped onto a window (2026-10-18): `src-tauri/src/drop.rs` and
+`src/drop.ts`. The webviews keep their own drag and drop (the editor needs it),
+so Tauri's drop handler stays off and the paths come from the webview itself.
+Linux: WebKitGTK shows the page no files at all for a drop from outside (types
+`text/uri-list` and `text/html`, empty data), so MarkText's import overlay never
+appears and WebKit's default action loaded the dropped file in place of the
+editor. Rust now watches the view's GTK `drag-data-received` signal, which fires
+during the hover without stopping WebKit, and sends the paths to the page,
+which takes the drop. Windows: WebView2 gives the page the files but no paths;
+the page posts the File objects with `chrome.webview.postMessageWithAdditionalObjects`
+and Rust reads each path from the message (`ICoreWebView2File::Path`), so the
+renderer's own overlay and `mt::window::drop` work as in Electron. Handling as
+in Electron (`main/menu/actions/file.ts` mt::window::drop): markdown files
+open, a file pandoc converts gets the "not available" notice, folders and
+other files are ignored. Every window now also refuses to navigate away from
+the app's own page, as Electron's `will-navigate` handler does. Checked on
+Xvfb with a GTK drag source (`packages/desktop-tauri/scripts/drag-source.py`,
+which uses the distrobox's python3-gobject): a markdown file and a folder onto the empty window, a
+markdown file and a .docx onto an open document (the editor no longer draws
+its drop marker for such a drag, and the document is left unchanged).
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -626,11 +647,10 @@ port. Unhandled channels are logged in debug builds (section 3).
 |---|---|
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
-| Folder drag and drop onto the window | `mt::window::drop`, `webUtils.getPathForFile`; Tauri drag drop event |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
-| Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
+| Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`; a drop needs the path at once (Muya `dragDropImage.ts` calls `getPathForFile`), which only Linux can give, from `src-tauri/src/drop.rs` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |

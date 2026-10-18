@@ -10,6 +10,7 @@ import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import { registerMenuHandlers } from './appMenu'
 import { appWindow, boot, isSettings, isWindows } from './boot'
+import { listenForDrops, registerDrop } from './drop'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
 import {
   listenForFileChanges,
@@ -305,6 +306,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
   registerSearch()
+  registerDrop()
 
   onInvoke('mt::i18n::load', async(language: string) => {
     const load = translations[`../../desktop/static/locales/${language}.json`]
@@ -398,5 +400,6 @@ export const startBackend = async(): Promise<void> => {
   await listenForFileChanges()
   await listenForFolder()
   await listenForFiles()
+  await listenForDrops()
   opening = bootEditor()
 }
