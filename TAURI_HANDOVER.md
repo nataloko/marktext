@@ -582,7 +582,8 @@ Xvfb with a GTK drag source (`packages/desktop-tauri/scripts/drag-source.py`,
 which uses the distrobox's python3-gobject): a markdown file and a folder onto the empty window, a
 markdown file and a .docx onto an open document (the editor no longer draws
 its drop marker for such a drag, and the document is left unchanged). Checked
-in the Windows VM by dragging from Explorer: the "Import or Open" overlay, a
+in the Windows VM by dragging from Explorer (a local MinGW build, then the CI
+installer `c2b5bcbc`): the "Import or Open" overlay, a
 markdown file onto it opens in a tab, a .docx gives the notice. As in
 Electron, only a drop on the overlay's box counts.
 
