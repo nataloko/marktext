@@ -1,0 +1,69 @@
+name: Tauri Windows build
+
+# Builds the Tauri trial (packages/desktop-tauri) on Windows: Rust tests and
+# Clippy, then the NSIS installer, uploaded as a build artifact. Only this
+# fork's tauri-trial branch uses it.
+
+on:
+  push:
+    branches: [tauri-trial]
+    paths:
+      - 'packages/desktop-tauri/**'
+      - 'packages/desktop/src/**'
+      - 'packages/desktop/static/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/tauri-windows.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop-tauri/src-tauri
+
+      - name: Rust tests
+        working-directory: packages/desktop-tauri/src-tauri
+        run: cargo test
+
+      - name: Clippy
+        working-directory: packages/desktop-tauri/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Type check
+        run: pnpm --filter marktext-tauri typecheck
+
+      - name: Build the web bundle
+        run: pnpm --filter marktext-tauri build:web
+
+      - name: Build the installer
+        run: pnpm --filter marktext-tauri exec tauri build --bundles nsis
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: marktext-tauri-windows-x64
+          path: packages/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

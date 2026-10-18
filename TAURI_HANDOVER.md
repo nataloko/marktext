@@ -182,12 +182,21 @@ and `sudo corepack enable` for pnpm. `cargo-tauri` lands in `~/.cargo/bin`, so
 add that to `PATH` inside the box. Run every command through
 `distrobox enter marktext -- ...`; the app opens on the host desktop from there.
 
-### Windows prerequisites (untested so far)
+### Windows prerequisites
 
-Visual Studio Build Tools (C++ workload), Rust (MSVC toolchain), Node, pnpm,
-`cargo install tauri-cli --version "^2" --locked`. WebView2 ships with Windows
-10/11. The bridge already picks `keybindingsWindows.ts` and win32 path handling
-when `platform === 'win32'`.
+Visual Studio Build Tools (C++ workload), Rust (MSVC toolchain), Node, pnpm.
+WebView2 ships with Windows 10/11. The bridge already picks
+`keybindingsWindows.ts` and win32 path handling when `platform === 'win32'`.
+
+The Tauri CLI is also a dev dependency of the package (`@tauri-apps/cli`), so
+`pnpm --filter marktext-tauri exec tauri build` works without
+`cargo install tauri-cli`; both run the same CLI version.
+
+GitHub Actions: `.github/workflows/tauri-windows.yml` runs on pushes to
+`tauri-trial` that touch the trial, the desktop sources or the lockfile, and on
+demand. It runs the Rust tests, Clippy with warnings as errors, the type check,
+and builds the NSIS installer, uploaded as the `marktext-tauri-windows-x64`
+artifact of the run. Actions may need enabling once on the fork (Actions tab).
 
 ### Install JS dependencies
 
@@ -489,8 +498,8 @@ then the ☰ menu, file watching and encodings.
    - whether the save dialog blocks typing in the editor while it is open
    - Wayland as well as X11
 2. **Code block Enter bug** on WebKit: reproduce in the Tauri app, then in Muya.
-3. **Windows build**: build on a Windows machine, or add a GitHub Actions
-   workflow on the fork (Tauri's `tauri-action` can build an NSIS installer).
+3. **Windows build**: GitHub Actions workflow added on 2026-10-18 (section 4).
+   Then test the installer by hand on Windows.
 4. **Decide the backend architecture** for the full port (section 3, first design
    decision) before porting multi window or session features.
 5. Work through section 7, starting with the ☰ menu (the only way to reach most

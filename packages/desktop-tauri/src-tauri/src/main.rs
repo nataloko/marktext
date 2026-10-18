@@ -236,6 +236,7 @@ fn write_atomic(target: &Path, contents: &[u8]) -> std::io::Result<()> {
         std::process::id(),
         TEMP_FILES.fetch_add(1, Ordering::Relaxed)
     ));
+    #[cfg(unix)]
     let permissions = std::fs::metadata(&target).ok().map(|meta| meta.permissions());
     let written = (|| {
         let mut options = std::fs::OpenOptions::new();
@@ -349,18 +350,21 @@ fn editing_command(window: tauri::WebviewWindow, command: String) -> Result<(), 
         "paste" => "Paste",
         other => return Err(format!("unknown editing command {other}")),
     };
-    #[cfg(target_os = "linux")]
-    return window
-        .with_webview(move |webview| {
-            use webkit2gtk::WebViewExt;
-            webview.inner().execute_editing_command(command);
-        })
-        .map_err(|err| err.to_string());
-    // Untested: WebView2 may refuse a paste that no key press started.
-    #[cfg(not(target_os = "linux"))]
-    return window
-        .eval(format!("document.execCommand('{}')", command.to_lowercase()))
-        .map_err(|err| err.to_string());
+    run_editing_command(&window, command).map_err(|err| err.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> tauri::Result<()> {
+    window.with_webview(move |webview| {
+        use webkit2gtk::WebViewExt;
+        webview.inner().execute_editing_command(command);
+    })
+}
+
+// Untested: WebView2 may refuse a paste that no key press started.
+#[cfg(not(target_os = "linux"))]
+fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> tauri::Result<()> {
+    window.eval(format!("document.execCommand('{}')", command.to_lowercase()))
 }
 
 // Electron's app.quit: every window gets a close request, so each one asks
