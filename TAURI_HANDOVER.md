@@ -553,9 +553,10 @@ same highlights, case sensitive, opening a result, and quick open from the
 command palette (Ctrl+Shift+P, Quick Open; paths shown with backslashes). On
 Windows, Ctrl+P prints instead: Electron's Windows table binds both
 `file.print` and `file.quick-open` to Ctrl+P, and the first one wins, in
-Electron (electron-localshortcut) as in the page. The trial has no print yet,
-so WebView2's own print dialog opens. Worth raising upstream, as the command
-palette shows Ctrl+P next to Quick Open.
+Electron (electron-localshortcut) as in the page. Before the trial had print,
+WebView2's own print dialog opened; Ctrl+P now reaches MarkText's Print
+(untested on Windows). Worth raising upstream, as the command palette shows
+Ctrl+P next to Quick Open.
 
 Files dropped onto a window (2026-10-18): `src-tauri/src/drop.rs` and
 `src/drop.ts`. The webviews keep their own drag and drop (the editor needs it),
@@ -750,6 +751,29 @@ path before checking the scope (`std::fs::canonicalize`), which fails on some
 drives, such as the VM's shared folder, so images there show "Load image
 failed" (403). A protocol of our own that skips that step would fix it.
 
+Export to HTML and PDF, and Print (2026-10-18): `src/export.ts` answers
+`mt::response-export` and `mt::response-print` from the renderer's export
+dialog, as `menu/actions/file.ts` does: HTML goes through the save dialog and
+`fs_write_file`; PDF and Print print the page itself, to which the renderer
+has added its print container, and the container is removed afterwards (also
+after a failed export, which Electron leaves). `src-tauri/src/print.rs`:
+Linux prints to a PDF with WebKitGTK's PrintOperation on GTK's "Print to
+File" printer, and Print runs the GTK print dialog; Windows uses WebView2's
+`PrintToPdf`, and Print is the page's `window.print()`. The File menu's Print
+goes to the export dialog as in Electron. WebKitGTK ignores the page's CSS
+`@page` margins, which Chromium applies, so `export.ts` reads them from the
+page's style sheets and Rust sets them on the paper (WebView2 gets them too).
+Checked on Xvfb: HTML export with the success notice, PDF export at A4 with
+the dialog's margins (40 mm left measured on the PDF), a 5 page document, and
+the GTK print dialog with Cancel. Linux only problems with a header or footer:
+- WebKitGTK does not repeat table headers or fixed elements on each printed
+  page, so the header is on the first page only and the footer on the last.
+- The renderer's header and footer table sizes its cells with `100vw`, which
+  WebKitGTK takes from the window when printing (Chromium from the page), so
+  the document moves right by half the difference and is cut off at the right
+  margin.
+Not yet checked on Windows.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -834,7 +858,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
-| Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Settings pages: fonts list, pandoc and command detection (`mt::cmd::exists`, needed for PicGo too) | `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |

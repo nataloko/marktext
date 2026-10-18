@@ -17,6 +17,7 @@ mod fileops;
 mod folders;
 mod keybindings;
 mod preferences;
+mod print;
 mod recent;
 mod search;
 mod user_data;
@@ -597,7 +598,9 @@ fn main() {
             keybindings::write_user_keybindings,
             keybindings::ensure_keybindings_file,
             clipboard::clipboard_write_image,
-            fileops::image_path_entries
+            fileops::image_path_entries,
+            print::print_to_pdf,
+            print::print_page
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())

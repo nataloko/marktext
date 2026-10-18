@@ -20,6 +20,7 @@ import {
 } from './buffers'
 import { listenForDrops, registerDrop } from './drop'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
+import { registerExport } from './export'
 import {
   listenForFileChanges,
   openTab,
@@ -190,6 +191,10 @@ const runCommand = (id: string): boolean => {
       case 'file.save-as':
         emitToRenderer('mt::editor-ask-file-save-as')
         break
+      // The File menu's Print (menu/actions/file.ts printDocument).
+      case 'file.print':
+        emitToRenderer('mt::show-export-dialog', 'print')
+        break
       case 'file.close-tab':
         emitToRenderer('mt::editor-close-tab')
         break
@@ -343,6 +348,7 @@ const registerHandlers = (): void => {
   registerUserData()
   registerSearch()
   registerDrop()
+  registerExport()
 
   onInvoke('mt::i18n::load', async(language: string) => {
     const load = translations[`../../desktop/static/locales/${language}.json`]
