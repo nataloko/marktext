@@ -628,10 +628,13 @@ suppressed in every window, as Electron has none (WebView2's had Back, Refresh,
 Print, Inspect); debug builds let Shift + right click through for Inspect.
 Checked on Xvfb: the menu at the pointer, Cut, Paste, Insert Paragraph After,
 greyed items, no webview menu in the sidebar. Paste from it failed once and not
-again in three tries with the same steps. Paste as Plain Text inserts nothing,
-from this menu and from the ☰ menu alike: the page reads the clipboard with
-`navigator.clipboard.readText` (`backend.ts` mt::clipboard::read-text) and
-Muya swallows the error; not yet investigated.
+again in three tries with the same steps. Paste as Plain Text inserted nothing,
+from this menu and the ☰ menu alike: the page read the clipboard with
+`navigator.clipboard.readText`, which WebKitGTK refuses (NotAllowedError), and
+Muya swallows the error. `src-tauri/src/clipboard.rs` now reads it in Rust
+(GTK's clipboard on Linux, `clipboard-win` on Windows); checked on Xvfb.
+Writing still uses `navigator.clipboard.writeText` (`mt::clipboard::write-text`)
+and may hit the same refusal; not checked.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because

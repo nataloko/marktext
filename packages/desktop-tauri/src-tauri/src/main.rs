@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 mod buffers;
+mod clipboard;
 mod drop;
 mod encoding;
 mod fileops;
@@ -539,6 +540,7 @@ fn main() {
             path_exists,
             is_directory,
             drop::is_markdown_file,
+            clipboard::clipboard_read_text,
             fileops::fs_is_file,
             fileops::fs_is_directory,
             fileops::fs_is_executable,

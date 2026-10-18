@@ -327,7 +327,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::shell::open-external', (url: string) => openUrl(url))
   onInvoke('mt::shell::open-path', (fullPath: string) => openPath(fullPath))
   onSend('mt::clipboard::write-text', (text: string) => navigator.clipboard.writeText(text))
-  onInvoke('mt::clipboard::read-text', () => navigator.clipboard.readText())
+  onInvoke('mt::clipboard::read-text', () => invoke<string>('clipboard_read_text'))
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
