@@ -655,7 +655,7 @@ position gives the centred default. In the Windows VM (CI installer
 wider at every start: the outer size was saved, which on Windows counts the
 invisible resize border around a frameless window, and then given to the next
 window as its inner size. The inner size is saved now; three starts of a local
-MinGW build kept the same width. Not checked: maximized, full screen,
+MinGW build and two of the CI installer (`e2352855`) kept the same width. Not checked: maximized, full screen,
 monitors with different scale factors.
 
 Crash on paste, Linux only (2026-10-18, older than that day's changes):
