@@ -868,6 +868,27 @@ MinGW build of `2d37277b`): the images on the shared Z: drive that showed
 "Load image failed" before now display (relative, through a folder with a
 space, and an absolute `Z:/` path), as does a picture on C:.
 
+Spellcheck, deferred (2026-10-19). The local branch `tauri-spellcheck-wip`
+(commit `5222e61c`, not pushed) has `src-tauri/src/spelling.rs` (Enchant 2
+opened at runtime on Linux, the Windows Spell Checking API over COM:
+dictionaries, check with suggestions, add, remove, the user's words, and
+switching WebKitGTK's checker), `src/spelling.ts` for the Spelling page's
+channels and the start up language, and the right-click Spelling submenu
+(the word under the pointer is checked and selected, as Chromium does).
+Found on Xvfb: WebKitGTK's own checker cannot underline for Muya. It checks
+words only as they are typed, and Muya redraws a paragraph when the caret
+enters or leaves it, which drops the marks and is never checked again, so
+text already in a document is never underlined. Chromium checks changed text
+again by itself, which is why Electron works. The likely way on Linux: keep
+WebKit's checker off and draw the underlines from the page with the CSS
+Custom Highlight API (`::highlight()` with a wavy red underline works in
+WebKitGTK 2.54), checking the editor's words through Enchant in batches with
+a cache. Not checked: whether WebView2's own underlines survive Muya's
+redraws (expected, since it is Chromium). The user agreed that added words go
+into the shared system word lists (Enchant's `~/.config/enchant/<tag>.dic`,
+the Windows user dictionary). Tests that open an Enchant dictionary create
+`~/.config/enchant`; run them with `XDG_CONFIG_HOME` pointing elsewhere.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -950,7 +971,7 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Missing | Electron code / channel |
 |---|---|
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
-| Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
+| Spellcheck (deferred; work so far on the local branch `tauri-spellcheck-wip`, see below) | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |
