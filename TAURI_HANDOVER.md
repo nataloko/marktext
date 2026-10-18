@@ -795,7 +795,9 @@ nothing is run. Electron also asks the login shell for its PATH, which is left
 for the uploader since that runs the program found. Checked on Xvfb: the
 Editor page's font box lists the installed families and a choice applies to
 the open editor; the Image page shows "PicGo is not installed", and "PicGo is
-installed" with an empty `picgo` file on PATH.
+installed" with an empty `picgo` file on PATH. Checked in the Windows VM (a
+local MinGW build of `b563ccbe`): the font box lists the Windows fonts (Agency
+FB, Algerian, Arial and so on) after the bundled Open Sans.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
