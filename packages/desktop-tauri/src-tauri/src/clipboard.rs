@@ -4,6 +4,21 @@
 // NotAllowedError), which left Paste as Plain Text with nothing to paste and
 // Copy Path copying nothing.
 
+// WebKitGTK 2.54 crashes (WebKit::Clipboard::formats) when it pastes while the
+// clipboard offers no formats at all: nothing has been copied, the program
+// that copied has quit, or the copy of an empty selection left the clipboard
+// empty. Its pastes go through here, so they only happen when there is
+// something to paste. Runs on the main thread.
+#[cfg(target_os = "linux")]
+pub fn when_pasteable(paste: impl FnOnce() + 'static) {
+    let targets = gtk::gdk::Atom::intern("TARGETS");
+    gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD).request_contents(&targets, move |_, data| {
+        if data.targets().is_some_and(|offered| !offered.is_empty()) {
+            paste();
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn clipboard_read_text(window: tauri::WebviewWindow) -> Result<String, String> {
     read_text(window).await

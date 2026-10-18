@@ -489,7 +489,12 @@ fn editing_command(window: tauri::WebviewWindow, command: String) -> Result<(), 
 fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> tauri::Result<()> {
     window.with_webview(move |webview| {
         use webkit2gtk::WebViewExt;
-        webview.inner().execute_editing_command(command);
+        let view = webview.inner();
+        if command == "Paste" {
+            clipboard::when_pasteable(move || view.execute_editing_command(command));
+        } else {
+            view.execute_editing_command(command);
+        }
     })
 }
 

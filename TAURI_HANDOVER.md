@@ -653,14 +653,21 @@ Xvfb: a resized and moved window comes back where it was, and an off screen
 position gives the centred default. Not checked: maximized, full screen,
 monitors with different scale factors.
 
-Known crash, Linux only (2026-10-18, predates that day's changes): with only a
-caret in the editor, Ctrl+C and then Ctrl+V crashes the app within seconds, in
-WebKitGTK's `WebKit::Clipboard::formats` callback. Muya cancels every copy event
-and, with nothing selected, sets no data (on purpose, marktext #3130, so the
-clipboard is left alone, as Chromium does); WebKitGTK seems to write the empty
-data, the window then owns a clipboard that offers no formats, and asking GTK
-for the formats of such a clipboard crashes WebKit (GTK reports the count as
--1). Not fixed yet.
+Crash on paste, Linux only (2026-10-18, older than that day's changes):
+WebKitGTK 2.54.1 crashes (in `WebKit::Clipboard::formats`, called back by
+GTK's `request_targets_received_func`) when it pastes while the clipboard
+offers no formats at all: nothing copied yet, the program that copied has
+quit, or a copy with nothing selected (WebKit's own copy then leaves an empty
+clipboard; Muya is not involved, a copy in the sidebar search box does it too).
+The paste keys (Ctrl+V, Shift+Insert, `src/paste.ts`) and the menus' Paste now
+go through Rust (`main.rs editing_command`), which asks GTK for the clipboard's
+formats first (`clipboard.rs when_pasteable`) and lets WebKit paste only when
+there are some. Checked on Xvfb against all three ways in. Still crashing: a
+middle click paste of the primary selection when nothing is selected anywhere;
+blocking the middle button's events stops it, but a replacement that pastes the
+primary selection itself pasted nothing and was followed by the same crash, so
+it was taken out. A first attempt that blamed Muya's cancelled copy did not
+help. Worth reporting to WebKit.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
