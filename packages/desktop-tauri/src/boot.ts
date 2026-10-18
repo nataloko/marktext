@@ -14,6 +14,8 @@ interface TauriBootInfo extends BootInfo {
   openFiles: string[]
   // The folder for the sidebar, if any.
   openFolder: string | null
+  // The window brings back the session saved in its store (./buffers).
+  restored: boolean
 }
 
 declare global {

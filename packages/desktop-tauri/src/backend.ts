@@ -10,6 +10,14 @@ import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import { registerMenuHandlers } from './appMenu'
 import { appWindow, boot, isSettings, isWindows } from './boot'
+import {
+  allowWrites,
+  cancelClose,
+  closeBuffer,
+  closeRisk,
+  restoreSession,
+  updateBufferState
+} from './buffers'
 import { listenForDrops, registerDrop } from './drop'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
 import {
@@ -278,13 +286,30 @@ const registerHandlers = (): void => {
 
   // Settings has no unsaved documents and closes at once (windows/setting.ts).
   onSend('mt::win::close', () => (isSettings ? closeWindow() : emitToRenderer('mt::ask-for-close')))
-  onSend('mt::close-window', closeWindow)
+  // The renderer saved the session just before (store/editor.ts
+  // LISTEN_FOR_CLOSE). With "Restore all" it closes a window with unsaved
+  // changes without asking, so a session that is not saved must not go
+  // unnoticed.
+  onSend('mt::close-window', async() => {
+    const risk = await closeRisk()
+    if (risk) {
+      const closeAnyway = await ask(
+        `${risk} Unsaved changes in this window may be lost. Close anyway?`,
+        { title: 'MarkText', kind: 'warning' }
+      )
+      if (!closeAnyway) return cancelClose()
+    }
+    await closeBuffer(false)
+    await closeWindow()
+  })
   onSend('mt::close-window-confirm', async(unsavedFiles: unknown[]) => {
     const discard = await ask(
       `${unsavedFiles.length} file(s) have unsaved changes. Close without saving?`,
       { title: 'MarkText', kind: 'warning' }
     )
-    if (discard) await closeWindow()
+    if (!discard) return cancelClose()
+    await closeBuffer(true)
+    await closeWindow()
   })
   onSend('mt::win::minimize', () => appWindow.minimize())
   onSend('mt::win::maximize', () => appWindow.maximize())
@@ -337,8 +362,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::spellchecker-switch-language', () => null)
   onInvoke('mt::spellchecker-remove-word', () => false)
 
-  // Session restore is out of scope; the renderer only needs a resolved promise.
-  onInvoke('update-buffer-state', () => true)
+  onInvoke('update-buffer-state', updateBufferState)
 
   onSend('mt::handle-renderer-error', (...args: unknown[]) =>
     console.error('[renderer error]', ...args)
@@ -364,19 +388,33 @@ const listenForFiles = (): Promise<unknown> =>
     opening = opening.then(() => openTabs(payload))
   })
 
-const bootEditor = async(): Promise<void> => {
-  // Files routed here while the window was loading waited in Rust until now.
-  const files = [...boot.openFiles, ...(await invoke<string[]>('window_ready'))]
-  await whenListening('mt::bootstrap-editor')
+const bootstrap = (addBlankTab: boolean): void => {
   emitToRenderer('mt::bootstrap-editor', {
-    addBlankTab: files.length === 0 && !boot.openFolder,
+    addBlankTab,
     markdownList: [],
     lineEnding: preferredEol(),
     sideBarVisibility: preferences.restoreLayoutState ? !!preferences.sideBarVisibility : false,
     tabBarVisibility: !!preferences.tabBarVisibility,
     sourceCodeModeEnabled: !!preferences.sourceCodeModeEnabled
   })
-  if (boot.openFolder) {
+}
+
+const bootEditor = async(): Promise<void> => {
+  // Files routed here while the window was loading waited in Rust until now.
+  const ready = await invoke<{ files: string[]; booted: boolean }>('window_ready')
+  // A reloaded page brings back its own session, which holds its files and folder.
+  const restore = boot.restored || ready.booted
+  const files = restore ? ready.files : [...boot.openFiles, ...ready.files]
+  await whenListening('mt::bootstrap-editor')
+  if (restore) {
+    await whenListening('mt::open-directory')
+    // The session replaces every tab, so routed files open after it.
+    await restoreSession(bootstrap)
+  } else {
+    allowWrites()
+    bootstrap(files.length === 0 && !boot.openFolder)
+  }
+  if (boot.openFolder && !restore) {
     await whenListening('mt::open-directory')
     await openFolder(boot.openFolder, true)
   }

@@ -34,6 +34,8 @@ struct Registry {
     editors: BTreeMap<u32, Editor>,
     // Window ids, least recently focused first.
     activity: Vec<u32>,
+    // Set by quit_app until every window has closed or one stays open.
+    quitting: bool,
 }
 
 #[derive(Default)]
@@ -46,6 +48,10 @@ struct Editor {
     // Files routed here before the page listened for them.
     ready: bool,
     pending: Vec<String>,
+    // Names the window's session store (src/buffers.rs).
+    buffer_id: Option<String>,
+    // The page has said it is about to close the window.
+    closing: bool,
 }
 
 // What `Registry::plan` does with paths from a command line.
@@ -193,8 +199,45 @@ impl Windows {
         self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn add(&self, id: u32, root: Option<String>) {
-        self.lock().add(id, root);
+    pub fn add(&self, id: u32, root: Option<String>, buffer_id: String) {
+        let mut registry = self.lock();
+        registry.add(id, root);
+        if let Some(editor) = registry.editors.get_mut(&id) {
+            editor.buffer_id = Some(buffer_id);
+        }
+    }
+
+    pub fn buffer_id(&self, id: u32) -> Option<String> {
+        self.lock().editors.get(&id)?.buffer_id.clone()
+    }
+
+    pub fn set_buffer_id(&self, id: u32, buffer_id: String) {
+        if let Some(editor) = self.lock().editors.get_mut(&id) {
+            editor.buffer_id = Some(buffer_id);
+        }
+    }
+
+    // No write lands once the window is closing, so none can bring back a
+    // store that closing deleted.
+    pub fn writable_buffer_id(&self, id: u32) -> Option<String> {
+        let registry = self.lock();
+        let editor = registry.editors.get(&id).filter(|editor| !editor.closing)?;
+        editor.buffer_id.clone()
+    }
+
+    // Marks the window as closing. Other windows closing at the same time do
+    // not count, so the last of them keeps its store.
+    pub fn begin_close(&self, id: u32) -> Option<Closing> {
+        let mut registry = self.lock();
+        let editor = registry.editors.get_mut(&id)?;
+        editor.closing = true;
+        let buffer_id = editor.buffer_id.clone()?;
+        let other_windows = registry.editors.iter().filter(|(&other, editor)| other != id && !editor.closing).count();
+        Some(Closing { buffer_id, other_windows, quitting: registry.quitting })
+    }
+
+    pub fn set_quitting(&self, quitting: bool) {
+        self.lock().quitting = quitting;
     }
 
     pub fn focus(&self, id: u32) {
@@ -204,6 +247,14 @@ impl Windows {
     pub fn remove(&self, id: u32) {
         self.lock().remove(id);
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Closing {
+    pub buffer_id: String,
+    // Editor windows that stay open.
+    pub other_windows: usize,
+    pub quitting: bool,
 }
 
 fn bring_to_front(window: &WebviewWindow) {
@@ -403,6 +454,7 @@ pub fn window_remove_file(
 
 // editor.ts openFolder: the window's sidebar shows the folder from now on,
 // which becomes the last opened folder and joins the recent documents.
+// Returns false when the window shows the folder already.
 #[tauri::command]
 pub fn window_open_folder(
     app: AppHandle,
@@ -412,14 +464,14 @@ pub fn window_open_folder(
     preferences: State<'_, Preferences>,
     recent: State<'_, RecentFiles>,
     path: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let id = editor_id(&window).ok_or("not an editor window")?;
     let root = crate::resolve_cli_path(&std::env::current_dir().unwrap_or_default(), &path);
     if !root.is_dir() {
         return Err(format!("{path} is not a folder"));
     }
     if !folders.open(&app, id, root.clone()) {
-        return Ok(());
+        return Ok(false);
     }
     let root = crate::display(&root);
     if let Some(editor) = windows.lock().editors.get_mut(&id) {
@@ -427,21 +479,42 @@ pub fn window_open_folder(
     }
     recent.add(&root);
     let changes = serde_json::Map::from_iter([("lastOpenedFolder".to_string(), root.into())]);
-    preferences.update(&app, changes)
+    preferences.update(&app, changes).map(|()| true)
 }
 
-// The page now listens for files to open; returns the ones that waited. A
-// page that boots, after a reload too, starts without a folder: it would
-// ignore the old folder's changes, and asking for that folder again would
-// change nothing.
+#[derive(Debug, Default, PartialEq, serde::Serialize)]
+pub struct Ready {
+    // Files that waited for the page.
+    files: Vec<String>,
+    // The page booted before: it was reloaded, and its session is in its store.
+    booted: bool,
+}
+
+impl Registry {
+    fn ready(&mut self, id: u32) -> Ready {
+        let Some(editor) = self.editors.get_mut(&id) else { return Ready::default() };
+        let booted = std::mem::replace(&mut editor.ready, true);
+        // A reloaded page did not close after all.
+        editor.closing = false;
+        Ready { files: std::mem::take(&mut editor.pending), booted }
+    }
+}
+
+// The page now listens for files to open. A page that boots, after a reload
+// too, starts without a folder: it would ignore the old folder's changes, and
+// asking for that folder again would change nothing.
 #[tauri::command]
-pub fn window_ready(window: WebviewWindow, windows: State<'_, Windows>, folders: State<'_, Folders>) -> Vec<String> {
-    let Some(id) = editor_id(&window) else { return Vec::new() };
+pub fn window_ready(window: WebviewWindow, windows: State<'_, Windows>, folders: State<'_, Folders>) -> Ready {
+    let Some(id) = editor_id(&window) else { return Ready::default() };
     folders.close(id);
-    let mut registry = windows.lock();
-    let Some(editor) = registry.editors.get_mut(&id) else { return Vec::new() };
-    editor.ready = true;
-    std::mem::take(&mut editor.pending)
+    windows.lock().ready(id)
+}
+
+// The user kept a window open while the app was quitting, so later closes
+// follow the usual rule again.
+#[tauri::command]
+pub fn close_cancelled(windows: State<'_, Windows>) {
+    windows.set_quitting(false);
 }
 
 #[cfg(test)]
@@ -500,6 +573,53 @@ mod tests {
         assert_eq!(registry.last_active(), Some(1));
         registry.remove(1);
         assert_eq!(registry.last_active(), None);
+    }
+
+    #[test]
+    fn windows_closing_together_leave_the_last_one_alone() {
+        let windows = Windows::default();
+        for id in 1..=3 {
+            windows.add(id, None, format!("buffer-{id}"));
+        }
+        let closing = |id: u32, other_windows: usize| {
+            Some(Closing { buffer_id: format!("buffer-{id}"), other_windows, quitting: false })
+        };
+        assert_eq!(windows.begin_close(2), closing(2, 2));
+        assert_eq!(windows.begin_close(1), closing(1, 1));
+        assert_eq!(windows.begin_close(3), closing(3, 0));
+        assert_eq!(windows.begin_close(4), None);
+    }
+
+    #[test]
+    fn a_closing_window_writes_nothing_until_it_boots_again() {
+        let windows = Windows::default();
+        windows.add(1, None, "buffer".into());
+        assert_eq!(windows.writable_buffer_id(1), Some("buffer".into()));
+        windows.begin_close(1);
+        assert_eq!(windows.writable_buffer_id(1), None);
+        windows.lock().ready(1);
+        assert_eq!(windows.writable_buffer_id(1), Some("buffer".into()));
+    }
+
+    #[test]
+    fn a_second_boot_is_detected() {
+        let windows = Windows::default();
+        windows.add(1, None, "buffer".into());
+        windows.lock().editors.get_mut(&1).unwrap().pending = files(&["/x.md"]);
+        assert_eq!(windows.lock().ready(1), Ready { files: files(&["/x.md"]), booted: false });
+        assert_eq!(windows.lock().ready(1), Ready { files: vec![], booted: true });
+        assert_eq!(windows.lock().ready(9), Ready::default());
+    }
+
+    #[test]
+    fn quitting_is_reported_to_closing_windows() {
+        let windows = Windows::default();
+        windows.add(1, None, "a".into());
+        windows.add(2, None, "b".into());
+        windows.set_quitting(true);
+        assert!(windows.begin_close(1).unwrap().quitting);
+        windows.set_quitting(false);
+        assert!(!windows.begin_close(2).unwrap().quitting);
     }
 
     #[test]

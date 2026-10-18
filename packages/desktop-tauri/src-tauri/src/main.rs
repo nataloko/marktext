@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+mod buffers;
 mod drop;
 mod encoding;
 mod fileops;
@@ -55,8 +56,18 @@ struct BootInfo {
     window_type: &'static str,
     // The settings page to show first, if any.
     category: Option<String>,
+    #[serde(flatten)]
+    contents: Contents,
+}
+
+// What an editor window opens with: files and a folder, or the session saved
+// in its store (src/buffers.rs).
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Contents {
     open_files: Vec<String>,
     open_folder: Option<String>,
+    restored: bool,
 }
 
 // Electron's BrowserWindow ids start at 1 and are never reused.
@@ -145,14 +156,30 @@ fn start_up_folder(preferences: &preferences::Preferences) -> Option<String> {
     (!folder.is_empty() && Path::new(&folder).is_dir()).then_some(folder)
 }
 
+// main/app/index.ts ready and createWindow: the sessions to restore, when the
+// start up action restores them and nothing else is to open. Otherwise the
+// start up folder joins the paths, and when paths open the stores with
+// nothing unsaved are forgotten.
+fn start_up(store_dir: &Path, preferences: &preferences::Preferences, files: &[String], folders: &mut Vec<String>) -> Vec<String> {
+    if files.is_empty() && folders.is_empty() {
+        if preferences.get("startUpAction").as_ref().and_then(|value| value.as_str()) == Some("restoreAll") {
+            return buffers::list(store_dir);
+        }
+        folders.extend(start_up_folder(preferences));
+    }
+    if !files.is_empty() || !folders.is_empty() {
+        buffers::clear_all_saved(store_dir);
+    }
+    Vec::new()
+}
+
 fn boot_info(
     app: &AppHandle,
     user_data: &Path,
     window_id: u32,
     window_type: &'static str,
     category: Option<String>,
-    open_files: Vec<String>,
-    open_folder: Option<String>,
+    contents: Contents,
 ) -> BootInfo {
     let cwd = std::env::current_dir().unwrap_or_default();
     let version = env!("CARGO_PKG_VERSION").to_string();
@@ -187,8 +214,7 @@ fn boot_info(
         window_id,
         window_type,
         category,
-        open_files,
-        open_folder,
+        contents,
     }
 }
 
@@ -308,7 +334,7 @@ fn is_sharing_error(err: &std::io::Error) -> bool {
 // Windows can hold a file for a moment after a watcher, a virus scanner or a
 // sync client looked at it, notably on network drives
 // (packages/desktop/src/main/filesystem/index.ts writeFile, #5322).
-fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     for delay in [50, 75, 50] {
         match std::fs::rename(from, to) {
             Err(err) if is_sharing_error(&err) => std::thread::sleep(Duration::from_millis(delay)),
@@ -351,12 +377,11 @@ fn window_builder<'a>(
     window_id: u32,
     window_type: &'static str,
     category: Option<String>,
-    open_files: Vec<String>,
-    open_folder: Option<String>,
+    contents: Contents,
 ) -> tauri::Result<tauri::WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let user_data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&user_data)?;
-    let boot = boot_info(app, &user_data, window_id, window_type, category, open_files, open_folder);
+    let boot = boot_info(app, &user_data, window_id, window_type, category, contents);
     let script = format!("window.__MT_BOOT__ = {};", serde_json::to_string(&boot)?);
     let dev_url = if cfg!(debug_assertions) { app.config().build.dev_url.clone() } else { None };
     Ok(tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
@@ -387,11 +412,22 @@ pub(crate) fn open_editor_window(
     open_files: Vec<String>,
     open_folder: Option<String>,
 ) -> tauri::Result<()> {
+    let contents = Contents { open_files, open_folder, restored: false };
+    build_editor_window(app, contents, buffers::new_id())
+}
+
+// A window for the session kept in the store `buffer_id`.
+fn open_restored_window(app: &AppHandle, buffer_id: String) -> tauri::Result<()> {
+    build_editor_window(app, Contents { restored: true, ..Contents::default() }, buffer_id)
+}
+
+fn build_editor_window(app: &AppHandle, contents: Contents, buffer_id: String) -> tauri::Result<()> {
     let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
     let label = windows::label(window_id);
-    let builder = window_builder(app, label, window_id, "editor", None, open_files, open_folder.clone())?;
+    let open_folder = contents.open_folder.clone();
+    let builder = window_builder(app, label, window_id, "editor", None, contents)?;
     let registry = app.state::<windows::Windows>();
-    registry.add(window_id, open_folder);
+    registry.add(window_id, open_folder, buffer_id);
     let window = builder
         .inner_size(1200.0, 800.0)
         .min_inner_size(400.0, 300.0)
@@ -417,7 +453,7 @@ async fn open_settings_window(app: AppHandle, category: Option<String>) -> Resul
     }
     let open = || -> tauri::Result<()> {
         let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
-        let window = window_builder(&app, SETTINGS_LABEL.into(), window_id, "settings", category, Vec::new(), None)?
+        let window = window_builder(&app, SETTINGS_LABEL.into(), window_id, "settings", category, Contents::default())?
             .inner_size(950.0, 650.0)
             .min_inner_size(450.0, 350.0)
             .minimizable(false)
@@ -472,9 +508,11 @@ fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> 
 }
 
 // Electron's app.quit: every window gets a close request, so each one asks
-// about its own unsaved documents.
+// about its own unsaved documents. Every window keeps its session store
+// (src/buffers.rs), until the user keeps one of them open.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
+    app.state::<windows::Windows>().set_quitting(true);
     for window in app.webview_windows().values() {
         let _ = window.close();
     }
@@ -527,6 +565,11 @@ fn main() {
             recent::recent_files,
             recent::add_recent_file,
             recent::clear_recent_files,
+            buffers::update_buffer_state,
+            buffers::load_buffer_state,
+            buffers::close_buffer,
+            buffers::abandon_buffer,
+            windows::close_cancelled,
             search::search_start,
             search::search_cancel
         ])
@@ -552,16 +595,27 @@ fn main() {
             let cwd = std::env::current_dir().unwrap_or_default();
             let args: Vec<String> = std::env::args().skip(1).collect();
             let (files, mut folders) = cli_paths(&cwd, &args);
-            if files.is_empty() && folders.is_empty() {
-                folders.extend(start_up_folder(&preferences));
-            }
+            let buffers = buffers::Buffers::new(&user_data);
+            buffers::remove_temp_files(buffers.dir());
+            let sessions = start_up(buffers.dir(), &preferences, &files, &mut folders);
             app.manage(preferences);
+            app.manage(buffers);
             app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
             app.manage(watch::FileWatcher::start(app.handle()));
-            if files.is_empty() && folders.is_empty() {
-                open_editor_window(app.handle(), Vec::new(), None)?;
-            } else {
+            if !files.is_empty() || !folders.is_empty() {
                 windows::open_paths(app.handle(), files, folders, false);
+                return Ok(());
+            }
+            // A session whose window fails to open stays on disk for next time.
+            let mut restored = 0;
+            for id in sessions {
+                match open_restored_window(app.handle(), id) {
+                    Ok(()) => restored += 1,
+                    Err(err) => eprintln!("[buffers] {err}"),
+                }
+            }
+            if restored == 0 {
+                open_editor_window(app.handle(), Vec::new(), None)?;
             }
             Ok(())
         })
@@ -602,6 +656,51 @@ mod tests {
             std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         names
+    }
+
+    fn saved_store(dir: &Path, id: &str) -> PathBuf {
+        let path = dir.join(format!("{id}_editor_buffer_store.json"));
+        std::fs::write(&path, r#"{"tabs":[{"isSaved":true}]}"#).unwrap();
+        path
+    }
+
+    fn preferences_with(dir: &Path, values: serde_json::Value) -> preferences::Preferences {
+        let path = dir.join("preferences.json");
+        std::fs::write(&path, values.to_string()).unwrap();
+        preferences::Preferences::load(path)
+    }
+
+    #[test]
+    fn start_up_restores_or_clears_saved_sessions() {
+        let dir = temp_dir("start-up");
+        let stores = dir.join("editorStates");
+        std::fs::create_dir_all(&stores).unwrap();
+        let folder = display(&dir);
+
+        // Restore all, with nothing else to open: the stores come back.
+        let store = saved_store(&stores, "one");
+        let restore = preferences_with(&dir, serde_json::json!({ "startUpAction": "restoreAll" }));
+        let mut folders = Vec::new();
+        assert_eq!(start_up(&stores, &restore, &[], &mut folders), vec!["one"]);
+        assert!(store.exists());
+
+        // Blank opens nothing, so nothing is forgotten.
+        let blank = preferences_with(&dir, serde_json::json!({ "startUpAction": "blank" }));
+        assert!(start_up(&stores, &blank, &[], &mut folders).is_empty());
+        assert!(store.exists());
+
+        // A start up folder opens like a path from the command line.
+        let open_folder =
+            preferences_with(&dir, serde_json::json!({ "startUpAction": "folder", "defaultDirectoryToOpen": folder }));
+        assert!(start_up(&stores, &open_folder, &[], &mut folders).is_empty());
+        assert_eq!(folders, vec![folder.clone()]);
+        assert!(!store.exists());
+
+        // So does a file named on the command line, whatever the action.
+        let store = saved_store(&stores, "two");
+        let mut folders = Vec::new();
+        assert!(start_up(&stores, &restore, &[display(&dir.join("x.md"))], &mut folders).is_empty());
+        assert!(!store.exists());
     }
 
     #[test]

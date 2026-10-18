@@ -24,6 +24,9 @@ interface FolderBatch {
 // folder this window has since replaced are dropped.
 let generation = 0
 
+// Called with the root of the next folder this window shows.
+const folderWaiters: Array<(root: string) => void> = []
+
 // Files just created in the sidebar, with the time. The renderer opens such
 // a file as the new tab from the content its add change brings (project.ts
 // newFileNameCache), so this window opens it like any other document. An add
@@ -60,6 +63,7 @@ const deliver = async(batch: FolderBatch): Promise<void> => {
   if (batch.root !== null && batch.generation > generation) {
     generation = batch.generation
     emitToRenderer('mt::open-directory', batch.root)
+    for (const resolve of folderWaiters.splice(0)) resolve(batch.root)
   }
   if (batch.generation !== generation) return
   for (const item of batch.changes) {
@@ -96,6 +100,24 @@ export const openFolder = async(pathname: string, sameWindow = false): Promise<v
       message: String(err)
     })
   }
+}
+
+// Opens a folder in this window and resolves once the renderer has been told,
+// with the root as Rust resolved it, or with null when the window shows that
+// folder already.
+export const showFolder = async(pathname: string): Promise<string | null> => {
+  let waiter: (root: string) => void = () => {}
+  const shown = new Promise<string>((resolve) => {
+    waiter = resolve
+    folderWaiters.push(resolve)
+  })
+  let opened = false
+  try {
+    opened = await invoke<boolean>('window_open_folder', { path: pathname })
+  } finally {
+    if (!opened && folderWaiters.includes(waiter)) folderWaiters.splice(folderWaiters.indexOf(waiter), 1)
+  }
+  return opened ? shown : null
 }
 
 // main/menu/actions/file.ts openFolder. The sidebar's own button always

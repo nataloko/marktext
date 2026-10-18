@@ -118,10 +118,10 @@ packages/desktop-tauri/
   Ctrl+S etc. `shortcuts.ts` reads the same Linux/Windows tables and
   `backend.ts runCommand` maps command ids to the same events main would send.
   Cut, copy and paste are deliberately left to the webview.
-- **`startUpAction: 'restoreAll'` is rewritten to `'blank'`** before the renderer
-  sees it (`rendererPreferences` in `backend.ts`). Session restore isn't
-  implemented, and with `restoreAll` the renderer would close the window without
-  asking about unsaved tabs. Remove this once restore exists.
+- **With `startUpAction: 'restoreAll'` (the default) a window with unsaved tabs
+  closes without asking**, as in Electron (renderer `store/editor.ts`
+  LISTEN_FOR_CLOSE): the session store (`src-tauri/src/buffers.rs`) is then the
+  only copy of that text, so changes there need care (section 5).
 - **`titleBarStyle` is forced to `custom`** and the window has no system
   decorations. The custom title bar uses `-webkit-app-region: drag`, which only
   Chromium understands, so `backend.ts` starts a window drag on mousedown inside
@@ -587,6 +587,35 @@ installer `c2b5bcbc`): the "Import or Open" overlay, a
 markdown file onto it opens in a tab, a .docx gives the notice. As in
 Electron, only a drop on the overlay's box counts.
 
+Session restore, the "Restore all" start up action (2026-10-18):
+`src-tauri/src/buffers.rs` and `src/buffers.ts` stand in for
+`main/editorBufferStore` and `main/windows/editor.ts` `_restoreAllState`. The
+renderer already sends each window's whole state (every tab with its unsaved
+text, cursor, scroll, folder, layout) through `update-buffer-state`, about a
+second after a change and again before the window closes; Rust writes it to
+`<app data>/editorStates/<id>_editor_buffer_store.json`, one file per window,
+written to a temporary file and renamed. At start up with "Restore all" and
+nothing on the command line, each store reopens as a window: saved tabs are
+read again from disk, unsaved ones keep their text, untitled tabs come back,
+a missing file is reported and its tab kept as unsaved, the folder opens once.
+Paths on the command line (or a start up folder) skip restore and delete the
+stores whose tabs were all saved. Changes from Electron, decided with the
+user: a store that cannot be read is moved aside to `.damaged` and reported;
+closing a window without saving deletes its store; quitting keeps every
+window's store (Electron deletes a clean window's store whenever other windows
+remain, so after a quit only windows with unsaved text plus one came back).
+Closing a single window keeps Electron's rule. A reviewer pass led to: a
+failed restore can never leave the window unable to save (it starts blank
+under a new store and says so); closing asks first whenever the session is not
+safely saved; text with a lone UTF-16 surrogate no longer fails every save;
+only real damage moves a store aside (a locked file is retried, then left
+alone); a page reload restores the window from its own store; writes stop once
+a window starts closing. Checked on Xvfb: unsaved and untitled tabs after
+quit and restart, a file changed outside and one deleted, two and three
+windows (a clean folder window comes back after quit), a command line start,
+a damaged store, close without saving under "blank". Not yet seen working: a
+page reload (Ctrl+F5 did not reload on Xvfb).
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -675,7 +704,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`; a drop needs the path at once (Muya `dragDropImage.ts` calls `getPathForFile`), which only Linux can give, from `src-tauri/src/drop.rs` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
-| Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | User keybindings (`keybindings.json`): save from the Keybindings page, apply to shortcuts and menu | `src/main/keyboard/shortcutHandler.ts`, `src/main/app/index.ts` mt::keybinding-* |
 | Auto update | `electron-updater`; Tauri updater plugin |

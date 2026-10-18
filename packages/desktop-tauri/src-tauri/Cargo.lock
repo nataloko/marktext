@@ -2185,6 +2185,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "trash",
+ "uuid",
  "webkit2gtk",
  "webview2-com",
  "windows-core",

@@ -20,12 +20,9 @@ export const loadPreferences = async(): Promise<void> => {
 export const setPreferences = (changes: Preferences): Promise<unknown> =>
   invoke('set_preferences', { changes })
 
-// What the renderer sees, for the full set or a change. Session restore is not
-// implemented in the trial, so "restoreAll" would let the window close without
-// asking about unsaved tabs (store/editor.ts LISTEN_FOR_CLOSE).
+// What the renderer sees, for the full set or a change.
 export const forRenderer = (prefs: Preferences): Preferences => {
   const shown = { ...prefs }
-  if (shown.startUpAction === 'restoreAll') shown.startUpAction = 'blank'
   delete shown.titleBarStyle
   return shown
 }

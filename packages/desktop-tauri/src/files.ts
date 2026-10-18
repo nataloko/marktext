@@ -26,7 +26,7 @@ const MARKDOWN_EXTENSIONS = [
   'txt'
 ]
 
-const addRecentFile = (pathname: string): Promise<unknown> =>
+export const addRecentFile = (pathname: string): Promise<unknown> =>
   invoke('add_recent_file', { path: pathname })
 
 const loadPreferences = (): LoadPreferences => ({
