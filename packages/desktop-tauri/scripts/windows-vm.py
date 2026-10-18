@@ -112,12 +112,20 @@ def click(x: int, y: int, how: str = "left") -> None:
 
 def drag(x1: int, y1: int, x2: int, y2: int) -> None:
     move(x1, y1)
-    time.sleep(0.15)
+    time.sleep(0.3)
     send([{"type": "btn", "data": {"down": True, "button": "left"}}])
-    for step in range(1, 11):
-        time.sleep(0.04)
-        move(x1 + (x2 - x1) * step // 10, y1 + (y2 - y1) * step // 10)
-    time.sleep(0.15)
+    time.sleep(0.3)
+    # Explorer starts a drag only after small moves past its threshold, and
+    # the drop target needs a few moves over it before it accepts the drop.
+    for step in range(1, 6):
+        move(x1 + step * 4, y1 + step * 2)
+        time.sleep(0.08)
+    for step in range(1, 41):
+        move(x1 + (x2 - x1) * step // 40, y1 + (y2 - y1) * step // 40)
+        time.sleep(0.05)
+    for wiggle in range(6):
+        move(x2 + wiggle % 2 * 6, y2)
+        time.sleep(0.15)
     send([{"type": "btn", "data": {"down": False, "button": "left"}}])
 
 
