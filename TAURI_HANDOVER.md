@@ -774,7 +774,15 @@ the GTK print dialog with Cancel. A header or footer on Linux:
   the document moved right by half the difference and was cut off at the right
   margin. `export.ts` adds a print style on Linux that gives the cells their
   normal width; checked on Xvfb with wrapping paragraphs at 40 mm and 15 mm.
-Not yet checked on Windows.
+Checked in the Windows VM (a local MinGW build of `6ec89a9a`): Ctrl+P opens
+MarkText's print options, then WebView2's print preview with the document,
+and Cancel puts the editor back; a 4 page PDF at A4 with 40 mm and 15 mm
+margins has the header and footer on every page; HTML export writes the file;
+both show the success notice. Differences from Electron seen there:
+WebView2's print preview adds the browser's own header and footer (date,
+title, the page address) unless they are turned off under More settings, and
+the PDF footer overlapped the last line of text on page 2 (the renderer's
+footer layout in Chromium, so probably the same in Electron; not compared).
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
