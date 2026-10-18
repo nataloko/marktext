@@ -141,7 +141,22 @@ const printDocument = async(): Promise<void> => {
   else await invoke('print_page', { margins: pageMargins() })
 }
 
+// The renderer's header and footer table (renderer util/exportHtml.ts) sizes
+// its cells with 100vw, which WebKitGTK takes from the window when printing
+// and Chromium from the page. Wider than the page, the document moved right
+// and was cut off.
+const WEBKIT_PRINT_STYLE = `@media print {
+  table.page-container > tbody,
+  table.page-container > tbody > tr,
+  table.page-container > tbody > tr > td { width: auto !important; }
+}`
+
 export const registerExport = (): void => {
+  if (boot.platform === 'linux') {
+    const style = document.createElement('style')
+    style.textContent = WEBKIT_PRINT_STYLE
+    document.head.appendChild(style)
+  }
   // Electron leaves the container after a failed PDF export; here it always goes.
   onSend('mt::response-export', async(request: ExportRequest) => {
     try {

@@ -765,13 +765,15 @@ goes to the export dialog as in Electron. WebKitGTK ignores the page's CSS
 page's style sheets and Rust sets them on the paper (WebView2 gets them too).
 Checked on Xvfb: HTML export with the success notice, PDF export at A4 with
 the dialog's margins (40 mm left measured on the PDF), a 5 page document, and
-the GTK print dialog with Cancel. Linux only problems with a header or footer:
+the GTK print dialog with Cancel. A header or footer on Linux:
 - WebKitGTK does not repeat table headers or fixed elements on each printed
   page, so the header is on the first page only and the footer on the last.
+  Not fixed.
 - The renderer's header and footer table sizes its cells with `100vw`, which
   WebKitGTK takes from the window when printing (Chromium from the page), so
-  the document moves right by half the difference and is cut off at the right
-  margin.
+  the document moved right by half the difference and was cut off at the right
+  margin. `export.ts` adds a print style on Linux that gives the cells their
+  normal width; checked on Xvfb with wrapping paragraphs at 40 mm and 15 mm.
 Not yet checked on Windows.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
