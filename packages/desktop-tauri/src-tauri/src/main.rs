@@ -24,6 +24,7 @@ mod preferences;
 mod print;
 mod recent;
 mod search;
+mod uploader;
 mod user_data;
 mod watch;
 mod window_state;
@@ -610,7 +611,8 @@ fn main() {
             fonts::fonts_list,
             cmd::cmd_exists,
             fetch::fetch_link_html,
-            fetch::fetch_plantuml
+            fetch::fetch_plantuml,
+            uploader::upload_image
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())

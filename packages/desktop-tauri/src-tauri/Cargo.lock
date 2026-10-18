@@ -2256,6 +2256,7 @@ dependencies = [
  "grep-searcher",
  "gtk",
  "ignore",
+ "libc",
  "notify",
  "percent-encoding",
  "png 0.18.1",

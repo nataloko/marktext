@@ -35,6 +35,10 @@ lto = true
 opt-level = "s"
 strip = true
 
+[target.'cfg(unix)'.dependencies]
+# Ends the login shell's process group on a timeout (src/cmd.rs).
+libc = "0.2"
+
 # Same versions wry uses: WebKitGTK for editing commands, debug console
 # output and dropped files, WebView2 for editing commands through the
 # DevTools protocol and dropped files.

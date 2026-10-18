@@ -17,6 +17,24 @@ export const IMAGE_EXTENSIONS = ['jpeg', 'jpg', 'png', 'gif', 'svg', 'webp']
 
 const setUserData = (changes: UserData): Promise<unknown> => invoke('set_user_data', { changes })
 
+// renderer util/fileSystem.ts uploadImage.
+interface UploadRequest {
+  pathname: string
+  image: string | { data: Uint8Array; name: string }
+  preferences: { currentUploader: string; cliScript: string }
+}
+
+// Rust runs the uploader (src-tauri/src/uploader.rs). A Uint8Array would reach
+// it as a JSON object, not a list of bytes.
+const uploadImage = ({ pathname, image, preferences }: UploadRequest): Promise<string> =>
+  invoke<string>('upload_image', {
+    request: {
+      pathname,
+      image: typeof image === 'string' ? image : { data: Array.from(image.data), name: image.name },
+      preferences
+    }
+  })
+
 interface ImagePathEntry {
   file: string
   type: 'directory' | 'image'
@@ -74,6 +92,7 @@ export const registerUserData = (): void => {
     invoke('fs_copy_with_content_hash', { src, outputDir })
   )
   onSend('mt::ask-for-image-auto-path', completeImagePath)
+  onInvoke('mt::uploader::upload', uploadImage)
 }
 
 export const listenForUserData = (): Promise<unknown> =>

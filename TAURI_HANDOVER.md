@@ -709,7 +709,7 @@ into a temporary file, then rename to `<sha1><ext>`). Checked on Xvfb: the
 Image page shows the stored folder, switching to "Copy to folder" and typing a
 new folder are saved, a pasted PNG (xclip) is written to that folder under its
 SHA-1 name, and an image inserted by path is copied there the same way.
-Uploading is not ported yet.
+Uploading came later (see "Image uploads" below).
 
 Local images (2026-10-18): Muya and the renderer point images at `file://`
 addresses, which the webviews refuse from the app's own page ("Not allowed to
@@ -791,8 +791,8 @@ Fonts list and command lookup (2026-10-18): `src-tauri/src/fonts.rs` answers
 in place of Electron's font-list. `src-tauri/src/cmd.rs` answers
 `mt::cmd::exists` (the Image page's PicGo check) by looking on PATH and in the
 folders package managers install to, as `main/utils/resolveCommand.ts` does;
-nothing is run. Electron also asks the login shell for its PATH, which is left
-for the uploader since that runs the program found. Checked on Xvfb: the
+nothing is run. The login shell's PATH came with the uploader (see "Image
+uploads" below). Checked on Xvfb: the
 Editor page's font box lists the installed families and a choice applies to
 the open editor; the Image page shows "PicGo is not installed", and "PicGo is
 installed" with an empty `picgo` file on PATH. Checked in the Windows VM (a
@@ -889,6 +889,27 @@ into the shared system word lists (Enchant's `~/.config/enchant/<tag>.dic`,
 the Windows user dictionary). Tests that open an Enchant dictionary create
 `~/.config/enchant`; run them with `XDG_CONFIG_HOME` pointing elsewhere.
 
+Image uploads (2026-10-19): `src-tauri/src/uploader.rs` answers
+`mt::uploader::upload` for the Image settings' "Upload to cloud", as
+`main/ipc/uploader.ts` does: PicGo (`picgo u <path>`) or the user's script
+(`<script> <path>`) uploads the image and prints its web address, which the
+renderer inserts. A pasted image is written to a temporary folder of its own
+first and removed afterwards; a path that is not an image comes back as it
+is. Unlike Electron, neither runs through a shell (Electron used one for
+PicGo on Windows, where `picgo` is a `.cmd` shim; Rust starts `.cmd` files
+with safe quoting), the image path is always one argument, the script has
+to be an absolute path to a program, and Windows shows no console window.
+`src-tauri/src/cmd.rs` now also asks the user's login shell for its PATH
+(`$SHELL -ilc`, once per run, five seconds at most, its process group ended
+afterwards), as `envPath.ts` does, for programs a version manager such as
+nvm installed; the uploaded programs run with that PATH in front. The
+Image page's PicGo check (`cmd_exists`) uses the same lookup, off the main
+thread. Checked on Xvfb with a stand in login shell and stand in programs:
+PicGo found only through the login shell's PATH and its "[PicGo SUCCESS]"
+address inserted, the script picked and saved on the Image page getting the
+temporary file as its one argument and its address inserted, and the
+temporary folders gone afterwards. Not tried on Windows.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -973,7 +994,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Spellcheck (deferred; work so far on the local branch `tauri-spellcheck-wip`, see below) | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
-| Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |
 
 Paths in this table are relative to `packages/desktop/`.
