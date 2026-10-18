@@ -14,7 +14,6 @@
     "core:window:allow-destroy",
     "core:window:allow-set-always-on-top",
     "core:webview:allow-set-webview-zoom",
-    "core:webview:allow-set-webview-focus",
     "dialog:default",
     "opener:default",
     {

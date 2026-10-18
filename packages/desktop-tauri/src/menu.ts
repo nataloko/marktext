@@ -3,7 +3,6 @@
 // context menus); src/appMenu.ts builds the ☰ menu with `showPopup`.
 
 import { LogicalPosition } from '@tauri-apps/api/dpi'
-import { getCurrentWebview } from '@tauri-apps/api/webview'
 import {
   Menu,
   type CheckMenuItemOptions,
@@ -63,11 +62,7 @@ export const showPopup = async(items: ItemOptions[], position?: MenuPopupPositio
   // The previous popup is gone once a new one opens; release it.
   await shown?.close()
   shown = await Menu.new({ items })
-  // On Windows and Linux this returns once the menu has closed. Windows then
-  // leaves keyboard focus on the window frame, so typing, and a paste from
-  // the menu, would go nowhere until the user clicked into the page.
   await shown.popup(position ? new LogicalPosition(position.x, position.y) : undefined)
-  await getCurrentWebview().setFocus()
 }
 
 export const popupMenu = (
