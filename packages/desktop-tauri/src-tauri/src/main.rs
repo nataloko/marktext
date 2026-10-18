@@ -541,6 +541,7 @@ fn main() {
             is_directory,
             drop::is_markdown_file,
             clipboard::clipboard_read_text,
+            clipboard::clipboard_write_text,
             fileops::fs_is_file,
             fileops::fs_is_directory,
             fileops::fs_is_executable,

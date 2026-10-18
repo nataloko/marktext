@@ -636,8 +636,9 @@ Muya swallows the error. `src-tauri/src/clipboard.rs` now reads it in Rust
 Checked in the Windows VM (a local MinGW build of `48cc0f1c`): the menu shows
 as a native menu with no WebView2 menu left, Cut, Paste and Paste as Plain
 Text work.
-Writing still uses `navigator.clipboard.writeText` (`mt::clipboard::write-text`)
-and may hit the same refusal; not checked.
+Writing had the same refusal (Copy Path on a tab copied nothing) and now goes
+through Rust too (`clipboard_write_text`); checked on Xvfb. Copy Image in the
+image viewer (`mt::clipboard::write-image`) has no handler yet.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because

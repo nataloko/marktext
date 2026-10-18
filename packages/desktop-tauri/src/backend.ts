@@ -326,7 +326,7 @@ const registerHandlers = (): void => {
   onSend('mt::shell::show-item', (fullPath: string) => revealItemInDir(fullPath))
   onInvoke('mt::shell::open-external', (url: string) => openUrl(url))
   onInvoke('mt::shell::open-path', (fullPath: string) => openPath(fullPath))
-  onSend('mt::clipboard::write-text', (text: string) => navigator.clipboard.writeText(text))
+  onSend('mt::clipboard::write-text', (text: string) => invoke('clipboard_write_text', { text }))
   onInvoke('mt::clipboard::read-text', () => invoke<string>('clipboard_read_text'))
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
