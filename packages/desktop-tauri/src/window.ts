@@ -58,6 +58,21 @@ export const installWindowEvents = async(): Promise<void> => {
     })
   }
 
+  // In Chromium (WebView2), pressing a title bar element that cannot take
+  // focus, such as the ☰ button, moves focus from the editor to the page body,
+  // and Muya then ignores typing and paste until the user clicks back in.
+  // Cancelling the press keeps the editor focused; the click still fires.
+  window.addEventListener(
+    'mousedown',
+    (event) => {
+      const target = event.target as Element | null
+      if (target?.closest('.title-bar') && !target.closest('input, textarea, [contenteditable="true"]')) {
+        event.preventDefault()
+      }
+    },
+    true
+  )
+
   // Replaces `-webkit-app-region: drag` on the custom title bar
   // (components/titleBar/index.vue), which only Chromium understands.
   const noDrag = '.title-no-drag, .frameless-titlebar-button, .word-count, button, input, a'

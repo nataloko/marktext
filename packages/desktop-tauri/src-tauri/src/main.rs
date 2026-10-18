@@ -369,12 +369,8 @@ fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> 
 fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> tauri::Result<()> {
     window.with_webview(move |webview| unsafe {
         use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
-        use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
         use windows_core::HSTRING;
-        let controller = webview.controller();
-        // The menu that sent this has just closed; a paste needs the page focused.
-        let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        let Ok(core) = controller.CoreWebView2() else { return };
+        let Ok(core) = webview.controller().CoreWebView2() else { return };
         let params = format!(r#"{{"type":"rawKeyDown","commands":["{}"]}}"#, command.to_lowercase());
         let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(())));
         let sent = core.CallDevToolsProtocolMethod(
@@ -386,28 +382,6 @@ fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> 
             eprintln!("[editing] {command}: {err}");
         }
     })
-}
-
-// Gives the page keyboard focus. On Windows a popup menu that closes leaves
-// it on the window frame, so typing would go nowhere until a click.
-#[tauri::command]
-fn focus_webview(window: tauri::WebviewWindow) -> Result<(), String> {
-    focus_page(&window).map_err(|err| err.to_string())
-}
-
-#[cfg(windows)]
-fn focus_page(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    window.with_webview(|webview| unsafe {
-        use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
-        if let Err(err) = webview.controller().MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) {
-            eprintln!("[focus] {err}");
-        }
-    })
-}
-
-#[cfg(not(windows))]
-fn focus_page(_window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    Ok(())
 }
 
 // Electron's app.quit: every window gets a close request, so each one asks
@@ -441,7 +415,6 @@ fn main() {
             toggle_devtools,
             new_editor_window,
             editing_command,
-            focus_webview,
             quit_app,
             preferences::get_preferences,
             preferences::set_preferences,
