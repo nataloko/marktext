@@ -467,7 +467,17 @@ and from the ☰ menu (the open tab follows, its watch moves with it, so an
 outside change to the renamed file still reloads it; a taken name asks or is
 refused with a notice), Move to Trash (Cancel keeps the file; on another disk
 the item goes to that disk's `.Trash-<uid>`, as the freedesktop rules say).
-Not checked: Move To (its save dialog takes no typing on Xvfb). Not ported:
+Checked in the Windows VM with the CI installer (`7f0e9c30`): a change of
+case alone (alpha.md to Alpha.md) on an open document, which stays watched;
+Move To through the Windows save dialog; the Move to Trash question (Windows
+makes Move To Trash its default button, hence the trash for replaced files).
+Move to Trash on the VM's shared folder fails with "CanonicalizePath": the
+trash crate resolves the path first, which that drive (and Rust's
+`canonicalize`) cannot do; the file is left alone. The Recycle Bin on a local
+drive is untested, since test files stay in the shared folder. Because such
+drives cannot resolve paths, the check against copying or moving a folder
+into itself now compares the paths as given first (`fileops.rs into_itself`).
+Not ported:
 copy-with-content-hash for pasted images; stat, unlink and empty-dir, which
 the renderer never calls. Deliberate differences from Electron: a file the
 user agrees to replace (Rename, Move To) goes to the trash instead of being

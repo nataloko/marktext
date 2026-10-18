@@ -131,8 +131,23 @@ fn already_exists(to: &Path) -> Error {
     Error::new(ErrorKind::AlreadyExists, format!("\"{name}\" already exists"))
 }
 
-// A folder copied or moved into itself would never end.
+fn inside(dir: &Path, path: &Path) -> bool {
+    if cfg!(windows) {
+        let fold = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+        fold(path).starts_with(fold(dir))
+    } else {
+        path.starts_with(dir)
+    }
+}
+
+// A folder copied or moved into itself would never end. The paths are
+// compared as given and, for links, as resolved; some drives, such as a
+// virtual machine's shared folder, cannot resolve paths at all.
 fn into_itself(from: &Path, to: &Path) -> bool {
+    let parent = to.parent().unwrap_or(to);
+    if inside(from, parent) {
+        return true;
+    }
     let Ok(from) = std::fs::canonicalize(from) else { return false };
     to.ancestors()
         .skip(1)
@@ -324,5 +339,14 @@ mod tests {
         assert!(!dir.join("src/inner/src").exists());
         let err = move_path(&dir.join("src"), &dir.join("src/inner/src")).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn into_itself_without_resolving_paths() {
+        let gone = std::env::temp_dir().join("mt-fileops-gone");
+        assert!(into_itself(&gone, &gone.join("inner/gone")));
+        assert!(into_itself(&gone, &gone.join("gone")));
+        assert!(!into_itself(&gone.join("a"), &gone.join("b")));
+        assert!(!into_itself(&gone.join("a"), &gone.join("ab/a")));
     }
 }
