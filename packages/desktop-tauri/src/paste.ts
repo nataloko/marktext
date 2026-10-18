@@ -14,6 +14,8 @@ const isPasteKey = (event: KeyboardEvent): boolean => {
   return event.shiftKey && !event.ctrlKey && event.key === 'Insert'
 }
 
+const MIDDLE_BUTTON = 1
+
 export const installPasteGuard = (): void => {
   if (boot.platform !== 'linux') return
   window.addEventListener(
@@ -25,4 +27,16 @@ export const installPasteGuard = (): void => {
     },
     true
   )
+  // A middle click would paste X11's primary selection the same way, and
+  // crash when nothing is selected anywhere, so it pastes nothing. Listeners
+  // such as the tabs' middle click to close still run.
+  for (const type of ['mousedown', 'mouseup', 'auxclick']) {
+    window.addEventListener(
+      type,
+      (event) => {
+        if ((event as MouseEvent).button === MIDDLE_BUTTON) event.preventDefault()
+      },
+      true
+    )
+  }
 }

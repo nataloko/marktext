@@ -667,12 +667,16 @@ clipboard; Muya is not involved, a copy in the sidebar search box does it too).
 The paste keys (Ctrl+V, Shift+Insert, `src/paste.ts`) and the menus' Paste now
 go through Rust (`main.rs editing_command`), which asks GTK for the clipboard's
 formats first (`clipboard.rs when_pasteable`) and lets WebKit paste only when
-there are some. Checked on Xvfb against all three ways in. Still crashing: a
-middle click paste of the primary selection when nothing is selected anywhere;
-blocking the middle button's events stops it, but a replacement that pastes the
-primary selection itself pasted nothing and was followed by the same crash, so
-it was taken out. A first attempt that blamed Muya's cancelled copy did not
-help. Worth reporting to WebKit.
+there are some. Checked on Xvfb against all three ways in. A middle click
+paste of the primary selection crashed the same way when nothing was selected
+anywhere; a replacement that pasted the primary selection itself pasted
+nothing and was followed by the same crash, so, decided with the user, a
+middle click pastes nothing on Linux now (`src/paste.ts` cancels the middle
+button's events; the tabs' middle click to close still works). Bringing it
+back is worth trying later: moving the caret to the click point probably
+replaces the primary selection before the paste reads it, which `xsel`
+(installed in the distrobox) can test. A first attempt that blamed Muya's
+cancelled copy did not help. Worth reporting to WebKit.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
