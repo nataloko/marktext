@@ -18,6 +18,7 @@ mod fetch;
 mod fileops;
 mod folders;
 mod fonts;
+mod images;
 mod keybindings;
 mod preferences;
 mod print;
@@ -551,6 +552,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol(images::SCHEME, images::protocol)
         .invoke_handler(tauri::generate_handler![
             read_markdown_file,
             write_markdown_file,

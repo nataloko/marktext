@@ -1,9 +1,9 @@
 // Local images. Muya and the renderer point images at `file://` addresses, as
 // Electron's page may load them, but the webviews refuse those from the app's
 // own page ("Not allowed to load local resource"). Each such address is
-// rewritten to Tauri's asset protocol (tauri.conf.json
-// app.security.assetProtocol) as it is set, and images that arrive in HTML
-// (Muya re-renders blocks through innerHTML) once they are in the document.
+// rewritten to the app's image protocol (src-tauri/src/images.rs) as it is
+// set, and images that arrive in HTML (Muya re-renders blocks through
+// innerHTML) once they are in the document.
 
 import { convertFileSrc } from '@tauri-apps/api/core'
 
@@ -23,7 +23,7 @@ export const toAssetUrl = (value: string): string => {
   if (/^\/[a-z]:\//i.test(path)) path = path.slice(1)
   // A share, file://server/share/a.png.
   if (url.host) path = `//${url.host}${path}`
-  return convertFileSrc(path) + url.search
+  return convertFileSrc(path, 'mt-image') + url.search
 }
 
 const rewrite = (image: HTMLImageElement): void => {

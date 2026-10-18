@@ -714,12 +714,11 @@ Uploading is not ported yet.
 Local images (2026-10-18): Muya and the renderer point images at `file://`
 addresses, which the webviews refuse from the app's own page ("Not allowed to
 load local resource"), so no local image showed in any document.
-`src/localImages.ts` rewrites such addresses to Tauri's asset protocol as they
-are set (the image `src` property and `setAttribute`), and images that arrive
-through `innerHTML` once they are in the document; the asset protocol is on in
-`tauri.conf.json` for every file the user can read (as Electron's page can
-read any of them), and `index.html`'s policy lets images load from it
-(`asset:` on Linux, `http://asset.localhost` on Windows). Checked on Xvfb:
+`src/localImages.ts` rewrites such addresses to the app's image protocol as
+they are set (the image `src` property and `setAttribute`), and images that
+arrive through `innerHTML` once they are in the document; `index.html`'s
+policy lets images load from it. This first used Tauri's asset protocol; see
+the image protocol below for why it was replaced. Checked on Xvfb:
 absolute and relative paths, a folder name with a space and a hidden folder
 all display, and so does a newly pasted image. Blocks Muya re-renders through
 `innerHTML` still log one refused `file://` load each before the rewrite;
@@ -746,10 +745,11 @@ build of `3fec40ec`): an image dragged from Explorer goes in at the drop point
 (copied to the local image folder with "Copy to folder"), and Copy in the
 diagram viewer followed by Ctrl+V pastes the diagram back as an image, so
 WebView2 reads the clipboard formats written (pasting into other programs not
-tried). Local images on Windows: the asset protocol works for normal drives (a picture on C: displays), but Tauri resolves each
-path before checking the scope (`std::fs::canonicalize`), which fails on some
-drives, such as the VM's shared folder, so images there show "Load image
-failed" (403). A protocol of our own that skips that step would fix it.
+tried). Local images on Windows: the asset protocol worked for normal drives
+(a picture on C: displayed), but Tauri resolves each path before checking the
+scope (`std::fs::canonicalize`), which fails on some drives, such as the VM's
+shared folder, so images there showed "Load image failed" (403). The image
+protocol below replaced it.
 
 Export to HTML and PDF, and Print (2026-10-18): `src/export.ts` answers
 `mt::response-export` and `mt::response-print` from the renderer's export
@@ -850,6 +850,20 @@ Checked on Xvfb with the preference on: the process runs notify's poll
 threads, an outside change to the open document and a file added or deleted
 in the sidebar folder show, and a save from MarkText stays quiet; with it off
 there are only the OS watcher threads and changes still show.
+
+Image protocol (2026-10-19): `src-tauri/src/images.rs` registers `mt-image`
+(`mt-image://localhost/<path>` on Linux, `http://mt-image.localhost/<path>` on
+Windows, built by `convertFileSrc(path, 'mt-image')`), which reads the file
+without resolving its path first, unlike the asset protocol, which is now
+off (no `protocol-asset` feature, no `assetProtocol` in `tauri.conf.json`). It
+serves only files whose content is an image (PNG, JPEG, GIF, WebP, BMP, ICO,
+AVIF, TIFF, SVG), with the type found from the content, and answers 404, 403
+or 415 otherwise; the asset protocol's scope had allowed every file. As there,
+`Access-Control-Allow-Origin` names the page's origin. Muya only loads local
+images whose names end in jpeg, jpg, png, gif, svg or webp, as in Electron.
+Checked on Xvfb: an absolute path, a relative one through a folder with a
+space and an SVG display, a text file named `.png` shows "Load image failed",
+and a PDF export includes the images.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because

@@ -5,14 +5,14 @@
     <title>MarkText</title>
     <!-- Same policy as packages/desktop/src/renderer/index.html, plus the
          sources Tauri needs: its IPC endpoint, the dev server socket, and the
-         asset protocol that local images are loaded through
-         (src/localImages.ts). -->
+         protocol that local images are loaded through (src/localImages.ts,
+         src-tauri/src/images.rs). -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self';
                   script-src 'self';
                   style-src 'self' 'unsafe-inline';
-                  img-src * data: file: blob: asset: http://asset.localhost;
+                  img-src * data: file: blob: mt-image: http://mt-image.localhost;
                   font-src 'self' data:;
                   connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420;
                   "

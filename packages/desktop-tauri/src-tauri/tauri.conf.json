@@ -10,11 +10,7 @@
     "withGlobalTauri": false,
     "windows": [],
     "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": { "allow": ["**"], "requireLiteralLeadingDot": false }
-      }
+      "csp": null
     }
   },
   "bundle": {
