@@ -527,7 +527,15 @@ cancel between matches, runs `search_cancel` off the main thread (it waits on
 a lock held while an event is sent, which would hang if sending ever needed
 the main thread, as it does with Tauri's `tracing` feature), and stops a
 search whose id is reused. The CI caught two tests sharing one folder, which
-failed on Windows only; each test now has its own.
+failed on Windows only; each test now has its own. Checked in the Windows VM
+with the CI installer (`5398e2ca`): the same 9 matches in 5 files with the
+same highlights, case sensitive, opening a result, and quick open from the
+command palette (Ctrl+Shift+P, Quick Open; paths shown with backslashes). On
+Windows, Ctrl+P prints instead: Electron's Windows table binds both
+`file.print` and `file.quick-open` to Ctrl+P, and the first one wins, in
+Electron (electron-localshortcut) as in the page. The trial has no print yet,
+so WebView2's own print dialog opens. Worth raising upstream, as the command
+palette shows Ctrl+P next to Quick Open.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
