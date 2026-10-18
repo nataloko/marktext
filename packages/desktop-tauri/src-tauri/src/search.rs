@@ -313,7 +313,12 @@ impl<O: Out> Sink for Collect<'_, O> {
         let text = String::from_utf8_lossy(lines);
         let offsets: Vec<usize> = submatches.iter().flat_map(|&(start, end)| [start, end]).collect();
         let columns = utf16_offsets(lines, &offsets);
+        // A multiline match's lines grow with each submatch, so a big one can
+        // take a while; check for a cancel as it goes.
         for (index, &(start, end)) in submatches.iter().enumerate() {
+            if self.out.stopped() {
+                return Ok(false);
+            }
             let (range, line_text) = locate(columns[2 * index], columns[2 * index + 1], &text, first_row);
             self.matches.push(json!({
                 "matchText": String::from_utf8_lossy(lines.get(start..end).unwrap_or_default()),
@@ -505,7 +510,10 @@ impl Searches {
         let id = request.search_id.clone();
         let search = Arc::new(Search { id: id.clone(), stop: AtomicBool::new(false), finished: Mutex::new(false), send });
         let key = (window, id);
-        lock(&self.0).insert(key.clone(), search.clone());
+        // A search under the same id could no longer be cancelled.
+        if let Some(previous) = lock(&self.0).insert(key.clone(), search.clone()) {
+            previous.stop.store(true, Ordering::Relaxed);
+        }
         let running = self.0.clone();
         std::thread::spawn(move || {
             search.run(&request);
@@ -544,8 +552,10 @@ pub fn search_start(window: WebviewWindow, searches: State<'_, Searches>, reques
     searches.start(id, request, Box::new(send))
 }
 
-// ripgrep.ts mt::rg::cancel.
-#[tauri::command]
+// ripgrep.ts mt::rg::cancel. Kept off the main thread: cancelling waits for an
+// event the search thread may be sending, which must never need the main
+// thread to finish.
+#[tauri::command(async)]
 pub fn search_cancel(window: WebviewWindow, searches: State<'_, Searches>, search_id: String) {
     if let Some(id) = windows::id_from_label(window.label()) {
         searches.cancel(id, &search_id);
@@ -846,5 +856,50 @@ mod tests {
         searches.cancel(7, "c");
         searches.cancel(7, "other");
         assert!(received.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn closing_the_window_stops_its_searches_without_a_word() {
+        let root = temp_dir("close");
+        for index in 0..50 {
+            write(&root, &format!("{index}.md"), "hello\n");
+        }
+        let request = |id: &str| Request {
+            search_id: id.into(),
+            mode: "text".into(),
+            directories: vec![display(&root)],
+            pattern: "hello".into(),
+            options: json!({}),
+        };
+        let (events, received) = mpsc::channel();
+        // A search that holds at its first event until the test lets it go on.
+        let held = |name: &'static str| {
+            let events = events.clone();
+            let (opened, gate) = mpsc::channel::<()>();
+            let gate = Mutex::new(gate);
+            let send: Sender = Box::new(move |channel, payload| {
+                let first = channel == PROGRESS && payload["num"] == 1;
+                events.send((name, channel)).unwrap();
+                if first {
+                    gate.lock().unwrap().recv().unwrap();
+                }
+            });
+            (send, opened)
+        };
+
+        let searches = Searches::default();
+        let (send, open_first) = held("first");
+        searches.start(7, request("s"), send);
+        assert_eq!(received.recv().unwrap(), ("first", PROGRESS));
+        // The same id again: the first search could no longer be reached.
+        let (send, open_second) = held("second");
+        searches.start(7, request("s"), send);
+        assert_eq!(received.recv().unwrap(), ("second", PROGRESS));
+
+        searches.close(7);
+        assert!(lock(&searches.0).is_empty());
+        open_first.send(()).unwrap();
+        open_second.send(()).unwrap();
+        assert!(received.recv_timeout(Duration::from_millis(300)).is_err());
     }
 }

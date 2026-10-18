@@ -515,6 +515,19 @@ one); an invalid regex or max file size ends the search with no results and a
 line on stderr, as Electron logs rg's refusal. Upstream renderer quirk: a
 match across lines shows a garbled preview, because `searchResultItem.vue`
 cuts the text with the start and end columns as if both were on one line.
+A reviewer pass compared the events with the real rg binary run through
+ripgrep.ts on about 35 cases (encodings, line endings, binary files, globs,
+ignore files, links) and found them identical, except that a file whose only
+match is an empty one at its end is left out, and columns in invalid UTF-8
+now count the replacement characters right. Kept from Electron on purpose: a
+multiline regex such as `\n\n` gives each match all the lines from it to the
+end of the merged block, so a long file can produce a result of tens of
+megabytes (35 MB for an 89 KB file). The commit after the review checks for a
+cancel between matches, runs `search_cancel` off the main thread (it waits on
+a lock held while an event is sent, which would hang if sending ever needed
+the main thread, as it does with Tauri's `tracing` feature), and stops a
+search whose id is reused. The CI caught two tests sharing one folder, which
+failed on Windows only; each test now has its own.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
