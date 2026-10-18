@@ -224,9 +224,40 @@ export const shell = {
   openExternal: (url: string): Promise<void> => openUrl(url)
 }
 
-// Only the macOS branches use these.
-export const Menu = {
-  sendActionToFirstResponder(): void {},
-  getApplicationMenu: (): null => null
+// A context menu is shown through the popup handler that src/appMenu.ts installs.
+type MenuTemplateItem = Record<string, unknown>
+type PopupHandler = (items: MenuTemplateItem[], position?: { x: number; y: number }) => void
+
+let popupHandler: PopupHandler | undefined
+
+export const setMenuPopupHandler = (handler: PopupHandler): void => {
+  popupHandler = handler
 }
+
+export class MenuItem {
+  constructor(public options: MenuTemplateItem) {}
+}
+
+export class Menu {
+  items: MenuItem[] = []
+
+  append(item: MenuItem): void {
+    this.items.push(item)
+  }
+
+  popup(options?: { x?: number; y?: number }): void {
+    const { x, y } = options ?? {}
+    popupHandler?.(
+      this.items.map((item) => item.options),
+      x === undefined || y === undefined ? undefined : { x, y }
+    )
+  }
+
+  // Only the macOS branches use these.
+  static sendActionToFirstResponder(): void {}
+  static getApplicationMenu(): null {
+    return null
+  }
+}
+
 export const screen = {}

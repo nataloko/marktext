@@ -616,6 +616,23 @@ windows (a clean folder window comes back after quit), a command line start,
 a damaged store, close without saving under "blank". Not yet seen working: a
 page reload (Ctrl+F5 did not reload on Xvfb).
 
+Editor right click menu (2026-10-18): `src/contextMenu.ts` works out the
+parameters Electron's `context-menu` event carries (selection, editable,
+image, position) from the DOM event and runs Electron's own builder
+(`main/contextMenu/editor`) unchanged, through `Menu`/`MenuItem` classes in
+`src/electron.ts` and the ☰ menu's popup code (`appMenu.ts popupTemplate`):
+Insert Paragraph Before/After, Cut, Copy, Paste, Copy as Rich Text, Copy as
+HTML, Paste as Plain Text, with cut and copy greyed out without a selection.
+Spelling items stay hidden until spellcheck exists. The webview's own menu is
+suppressed in every window, as Electron has none (WebView2's had Back, Refresh,
+Print, Inspect); debug builds let Shift + right click through for Inspect.
+Checked on Xvfb: the menu at the pointer, Cut, Paste, Insert Paragraph After,
+greyed items, no webview menu in the sidebar. Paste from it failed once and not
+again in three tries with the same steps. Paste as Plain Text inserts nothing,
+from this menu and from the ☰ menu alike: the page reads the clipboard with
+`navigator.clipboard.readText` (`backend.ts` mt::clipboard::read-text) and
+Muya swallows the error; not yet investigated.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -698,7 +715,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Missing | Electron code / channel |
 |---|---|
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
-| Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |

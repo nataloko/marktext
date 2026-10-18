@@ -234,6 +234,16 @@ const showApplicationMenu = async(position?: MenuPopupPosition): Promise<void> =
   await showPopup(toTauriItems(model.items), position)
 }
 
+// A context menu from reused Electron code (electron.ts Menu.popup).
+export const popupTemplate = (
+  template: MenuItemConstructorOptions[],
+  position?: MenuPopupPosition
+): void => {
+  showPopup(toTauriItems(toModel(template).items), position).catch((err) =>
+    console.error('[tauri] context menu failed', err)
+  )
+}
+
 // ---- channels -----------------------------------------------------------------
 
 export const registerMenuHandlers = (): void => {

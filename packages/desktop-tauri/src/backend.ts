@@ -28,6 +28,7 @@ import {
   showOpenDialog,
   type SaveRequest
 } from './files'
+import { installContextMenu } from './contextMenu'
 import { registerFileOperations } from './fileOps'
 import { listenForFolder, openFolder, showOpenFolderDialog } from './folders'
 import { popupMenu } from './menu'
@@ -431,6 +432,7 @@ export const startBackend = async(): Promise<void> => {
   await loadPreferences()
   setWindowUrlParams()
   await installWindowEvents()
+  installContextMenu()
   await listenForRendererMessages()
   // The settings window has no documents, menu or editor shortcuts.
   if (isSettings) return
