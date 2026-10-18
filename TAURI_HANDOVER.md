@@ -740,8 +740,12 @@ filters them with the same fuzzaldrin call as Electron (no cache or folder
 watching). Checked on Xvfb: an image dropped at the end of a line goes in there
 and is copied to the image folder, `./` in the image box lists the folder's
 images and subfolders, and Copy in the diagram viewer leaves an `image/png` of
-the diagram on the clipboard. Local images on Windows: the asset protocol
-works for normal drives (a picture on C: displays), but Tauri resolves each
+the diagram on the clipboard. Checked in the Windows VM (a local MinGW
+build of `3fec40ec`): an image dragged from Explorer goes in at the drop point
+(copied to the local image folder with "Copy to folder"), and Copy in the
+diagram viewer followed by Ctrl+V pastes the diagram back as an image, so
+WebView2 reads the clipboard formats written (pasting into other programs not
+tried). Local images on Windows: the asset protocol works for normal drives (a picture on C: displays), but Tauri resolves each
 path before checking the scope (`std::fs::canonicalize`), which fails on some
 drives, such as the VM's shared folder, so images there show "Load image
 failed" (403). A protocol of our own that skips that step would fix it.
