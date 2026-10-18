@@ -1042,6 +1042,9 @@ then the ☰ menu, file watching and encodings.
      some window managers means no resize border)
    - whether the save dialog blocks typing in the editor while it is open
    - Wayland as well as X11
+   First desktop run (2026-10-19, debug build in the distrobox, GNOME on
+   Wayland): the user found it responsive, and resizing the window works.
+   The rest of the list is still to try.
 2. **Code block Enter bug** on WebKit: reproduce in the Tauri app, then in Muya.
 3. **Windows build**: GitHub Actions workflow added on 2026-10-18 (section 4).
    Then test the installer by hand on Windows.
