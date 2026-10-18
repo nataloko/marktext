@@ -707,9 +707,23 @@ change), the image folder picker and the image file picker. `fileops.rs` adds
 into a temporary file, then rename to `<sha1><ext>`). Checked on Xvfb: the
 Image page shows the stored folder, switching to "Copy to folder" and typing a
 new folder are saved, a pasted PNG (xclip) is written to that folder under its
-SHA-1 name, and an image inserted by path is copied there the same way. Neither
-displays: the page refuses `file://` addresses (section 7). Uploading is not
-ported yet.
+SHA-1 name, and an image inserted by path is copied there the same way.
+Uploading is not ported yet.
+
+Local images (2026-10-18): Muya and the renderer point images at `file://`
+addresses, which the webviews refuse from the app's own page ("Not allowed to
+load local resource"), so no local image showed in any document.
+`src/localImages.ts` rewrites such addresses to Tauri's asset protocol as they
+are set (the image `src` property and `setAttribute`), and images that arrive
+through `innerHTML` once they are in the document; the asset protocol is on in
+`tauri.conf.json` for every file the user can read (as Electron's page can
+read any of them), and `index.html`'s policy lets images load from it
+(`asset:` on Linux, `http://asset.localhost` on Windows). Checked on Xvfb:
+absolute and relative paths, a folder name with a space and a hidden folder
+all display, and so does a newly pasted image. Blocks Muya re-renders through
+`innerHTML` still log one refused `file://` load each before the rewrite;
+the image then loads. Nothing reads an image's `src` back as a path (only the
+PlantUML export reads `src`, and those are web addresses).
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
@@ -800,7 +814,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Settings pages: fonts list, pandoc and command detection (`mt::cmd::exists`, needed for PicGo too) | `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
-| Local images in documents do not display: the page may not load `file://` addresses | Electron loads them directly |
 | Auto update | `electron-updater`; Tauri updater plugin |
 | Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
 

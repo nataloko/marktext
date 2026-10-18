@@ -31,6 +31,7 @@ import {
 import { installContextMenu } from './contextMenu'
 import { registerFileOperations } from './fileOps'
 import { listenForFolder, openFolder, showOpenFolderDialog } from './folders'
+import { installLocalImages } from './localImages'
 import { popupMenu } from './menu'
 import { installPasteGuard } from './paste'
 import {
@@ -447,6 +448,7 @@ export const startBackend = async(): Promise<void> => {
   await installWindowEvents()
   installContextMenu()
   installPasteGuard()
+  installLocalImages()
   await listenForRendererMessages()
   // The settings window has no documents, menu or editor shortcuts.
   if (isSettings) return
