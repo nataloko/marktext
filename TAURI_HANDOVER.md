@@ -863,7 +863,10 @@ or 415 otherwise; the asset protocol's scope had allowed every file. As there,
 images whose names end in jpeg, jpg, png, gif, svg or webp, as in Electron.
 Checked on Xvfb: an absolute path, a relative one through a folder with a
 space and an SVG display, a text file named `.png` shows "Load image failed",
-and a PDF export includes the images.
+and a PDF export includes the images. Checked in the Windows VM (a local
+MinGW build of `2d37277b`): the images on the shared Z: drive that showed
+"Load image failed" before now display (relative, through a folder with a
+space, and an absolute `Z:/` path), as does a picture on C:.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
