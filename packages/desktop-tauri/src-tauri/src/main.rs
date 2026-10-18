@@ -362,10 +362,26 @@ fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> 
     })
 }
 
-// Untested: WebView2 may refuse a paste that no key press started.
-#[cfg(not(target_os = "linux"))]
+// WebView2 refuses `document.execCommand('paste')` from script. Sent through
+// the DevTools protocol, the command counts as the user's own, as Electron's
+// webContents.paste() does inside Chromium.
+#[cfg(windows)]
 fn run_editing_command(window: &tauri::WebviewWindow, command: &'static str) -> tauri::Result<()> {
-    window.eval(format!("document.execCommand('{}')", command.to_lowercase()))
+    window.with_webview(move |webview| unsafe {
+        use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+        use windows_core::HSTRING;
+        let Ok(core) = webview.controller().CoreWebView2() else { return };
+        let params = format!(r#"{{"type":"rawKeyDown","commands":["{}"]}}"#, command.to_lowercase());
+        let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(())));
+        let sent = core.CallDevToolsProtocolMethod(
+            &HSTRING::from("Input.dispatchKeyEvent"),
+            &HSTRING::from(params),
+            &handler,
+        );
+        if let Err(err) = sent {
+            eprintln!("[editing] {command}: {err}");
+        }
+    })
 }
 
 // Electron's app.quit: every window gets a close request, so each one asks

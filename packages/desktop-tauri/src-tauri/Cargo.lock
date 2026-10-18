@@ -2074,6 +2074,8 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "webkit2gtk",
+ "webview2-com",
+ "windows-core",
 ]
 
 [[package]]

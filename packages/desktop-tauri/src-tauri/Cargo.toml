@@ -24,6 +24,11 @@ lto = true
 opt-level = "s"
 strip = true
 
-# Same version wry uses, for debug-only access to WebKitGTK settings.
+# Same versions wry uses: WebKitGTK for editing commands and debug console
+# output, WebView2 for editing commands through the DevTools protocol.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "=2.0.2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
