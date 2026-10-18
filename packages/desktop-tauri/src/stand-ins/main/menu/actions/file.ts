@@ -6,7 +6,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { MenuItem } from 'electron'
 import type { MenuWindow } from '../../../../appMenu'
-import { openTab, showOpenDialog } from '../../../../files'
+import { showOpenDialog } from '../../../../files'
+import { openFileOrFolder as openPath, showOpenFolderDialog } from '../../../../folders'
 import { setPreferences } from '../../../../preferences'
 import { newWindow } from '../../../../window'
 import { notAvailable } from '../../../notAvailable'
@@ -30,11 +31,12 @@ export const openFile = (): void => {
   void showOpenDialog()
 }
 
-export const openFolder = (): void => notAvailable('Open Folder')
+export const openFolder = (): void => {
+  void showOpenFolderDialog()
+}
 
-// Recent files are always files here; folders need the sidebar.
 export const openFileOrFolder = (_win: Win, pathname: string): void => {
-  void openTab(pathname)
+  void openPath(pathname)
 }
 
 export const clearRecentlyUsed = (): void => {

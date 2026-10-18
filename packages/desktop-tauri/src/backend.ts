@@ -19,6 +19,7 @@ import {
   showOpenDialog,
   type SaveRequest
 } from './files'
+import { listenForFolder, openFolder, showOpenFolderDialog } from './folders'
 import { popupMenu } from './menu'
 import {
   forRenderer,
@@ -157,6 +158,9 @@ const runCommand = (id: string): boolean => {
       case 'file.open-file':
         void showOpenDialog()
         break
+      case 'file.open-folder':
+        void showOpenFolderDialog()
+        break
       case 'file.save':
         emitToRenderer('mt::editor-ask-file-save')
         break
@@ -255,6 +259,8 @@ const registerHandlers = (): void => {
   )
 
   onSend('mt::cmd-open-file', showOpenDialog)
+  onSend('mt::cmd-open-folder', () => showOpenFolderDialog())
+  onSend('mt::ask-for-open-project-in-sidebar', () => showOpenFolderDialog(true))
   onSend('mt::open-file', (pathname: string) => openTab(pathname))
   onSend('mt::window-tab-closed', (pathname: string) =>
     invoke('window_remove_file', { path: pathname })
@@ -330,9 +336,7 @@ const registerHandlers = (): void => {
   )
 
   // Bookkeeping that has no counterpart in the trial.
-  for (const channel of ['mt::window-initialized', 'mt::ask-for-open-project-in-sidebar']) {
-    onSend(channel, () => {})
-  }
+  onSend('mt::window-initialized', () => {})
 }
 
 // Files a second launch sends to this window (src-tauri/src/windows.rs). They
@@ -356,13 +360,17 @@ const bootEditor = async(): Promise<void> => {
   const files = [...boot.openFiles, ...(await invoke<string[]>('window_ready'))]
   await whenListening('mt::bootstrap-editor')
   emitToRenderer('mt::bootstrap-editor', {
-    addBlankTab: files.length === 0,
+    addBlankTab: files.length === 0 && !boot.openFolder,
     markdownList: [],
     lineEnding: preferredEol(),
     sideBarVisibility: preferences.restoreLayoutState ? !!preferences.sideBarVisibility : false,
     tabBarVisibility: !!preferences.tabBarVisibility,
     sourceCodeModeEnabled: !!preferences.sourceCodeModeEnabled
   })
+  if (boot.openFolder) {
+    await whenListening('mt::open-directory')
+    await openFolder(boot.openFolder, true)
+  }
   if (!files.length) return
   await whenListening('mt::open-new-tab')
   await openTabs(files)
@@ -381,6 +389,7 @@ export const startBackend = async(): Promise<void> => {
   if (isSettings) return
   installShortcuts(keybindings, runCommand)
   await listenForFileChanges()
+  await listenForFolder()
   await listenForFiles()
   opening = bootEditor()
 }

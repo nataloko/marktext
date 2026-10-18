@@ -339,7 +339,7 @@ one; `--new-window` and the `openFilesInNewWindow` preference open new windows;
 no files just raises the last window. Deliberate difference: a file already open
 in some window goes to that window, which switches to its tab (Electron means to
 skip it, but its scoring only notices files open in the first window). Not done:
-folders (need the sidebar), files that do not exist yet (passed on, so the
+files that do not exist yet (passed on, so the
 page shows "Cannot open tab"; Electron opens them as named empty documents),
 and raising windows on Wayland is untested. Note that any running build,
 debug or release, now catches launches of the other.
@@ -354,7 +354,7 @@ Typewriter and Focus greyed and Format greyed, Always on Top, Follow System
 Theme and a theme change through the reused theme actions, Open Recent from
 Rust's `recently-used-documents.json`). Quit now closes every window, each
 asking about its own unsaved documents. Not available yet, with a notice:
-Open Folder, Preferences, pandoc import and export, Check for Updates.
+pandoc import and export, Check for Updates.
 Known problems:
 - Cut, Copy and Paste in the Edit menu first did nothing: GTK's built in items
   do not act on the WebKit page. Fixed by `main.rs editing_command`, which runs
@@ -420,6 +420,34 @@ defaults. Not yet: saving custom shortcuts (shows a notice), the Image page's
 user data (image folder, uploaders: `mt::set-user-data`, dataCenter), the
 fonts list, pandoc and command detection (read as missing), spellchecker
 dictionaries (empty lists).
+
+Folders, part 1 of the sidebar (2026-10-18), checked on Xvfb:
+`src-tauri/src/folders.rs` gives each window with a folder a thread that lists
+it and then follows it with `notify`: on Linux one inotify watch per listed
+folder, so skipped folders such as node_modules cost none; on Windows one
+recursive watch. It does not rely on what each event says: it lists the
+folders that had events again and sends the differences, in batches, as
+Electron's `mt::update-object-tree` changes (`src/folders.ts` passes them on).
+What is shown follows `watcher.ts`: every folder except node_modules and
+Electron archives, markdown files only, minus `treePathExcludePatterns`. A
+folder opens from the ☰ menu, Ctrl+Shift+O, the sidebar's button, the recent
+list (which now holds folders too), the command line, a second launch (a
+folder already shown brings its window forward; `_openPathList` is ported as
+`windows.rs plan`) and the start up options "open the default folder" and
+"open the last folder". Opening one sets `lastOpenedFolder`, joins the recent
+list and follows `openFolderInNewWindow`; routing prefers the window whose
+folder holds a file. Checked: live add, remove and rename of files and
+folders, a folder replaced under the same name, a page reload, 5,000 files in
+100 folders (shown in about 4 s). Differences from Electron: add changes carry
+no file content (Electron reads every file in the tree), links to folders
+inside the tree are not followed (that folder would need a second inotify
+watch), and globset lets `*` match a leading dot where minimatch does not.
+Not checked: picking a folder in the GTK dialog (it gets no keyboard focus on
+Xvfb), Windows. A reviewer pass found, and the commit fixes: a folder replaced
+under the same name lost its watch; links to a folder already shown shared one
+inotify watch; notify on Windows drops overflowing events without a word (a
+busy round now lists everything again); an older folder could win a race with
+a newer one; a page reload lost the sidebar.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
@@ -502,15 +530,16 @@ port. Unhandled channels are logged in debug builds (section 3).
 
 | Missing | Electron code / channel |
 |---|---|
-| ☰ menu: Cut, Copy, Paste; Open Folder, Preferences, pandoc, updates (see section 5) | `src/main/menu/actions/` |
+| ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
-| Sidebar, open folder, file tree | `mt::ask-for-open-project-in-sidebar`, `src/main/menu/actions/file.ts`, `src/main/filesystem/watcher.ts` |
+| Sidebar file operations: new file or folder, rename, move, copy, paste, delete to trash; the menu's Rename and Move To. A file created in the sidebar must arrive with its content (`data` in the add change), which the renderer opens as the new tab | `mt::fs::*`, `mt::fs-trash-item`, `mt::rename`, `mt::response-file-move-to`, `renderer/src/store/project.ts` |
+| Folder drag and drop onto the window | `mt::window::drop`, `webUtils.getPathForFile`; Tauri drag drop event |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
-| Find in folder | `mt::rg::*` (ripgrep; can ship as a Tauri sidecar binary) |
-| Folders on the command line or from a second launch; missing CLI files as named empty documents | `src/main/app/index.ts _openPathList`, `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
+| Find in folder and quick open | `mt::rg::*`, `mt::open-file-by-window-id` (ripgrep's crates can run in process) |
+| Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | User keybindings (`keybindings.json`): save from the Keybindings page, apply to shortcuts and menu | `src/main/keyboard/shortcutHandler.ts`, `src/main/app/index.ts` mt::keybinding-* |

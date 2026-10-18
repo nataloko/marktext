@@ -126,19 +126,26 @@ impl Preferences {
     }
 }
 
+impl Preferences {
+    // Stores the changes and tells every window about them.
+    pub fn update(&self, app: &AppHandle, changes: Map<String, Value>) -> Result<(), String> {
+        let mut changes = self.apply(changes)?;
+        // The title bar style cannot change while windows are open.
+        changes.remove("titleBarStyle");
+        if changes.is_empty() {
+            return Ok(());
+        }
+        app.emit("mt::user-preference", changes).map_err(|err| err.to_string())
+    }
+}
+
 #[tauri::command]
 pub fn set_preferences(
     app: AppHandle,
     preferences: State<'_, Preferences>,
     changes: Map<String, Value>,
 ) -> Result<(), String> {
-    let mut changes = preferences.apply(changes)?;
-    // The title bar style cannot change while windows are open.
-    changes.remove("titleBarStyle");
-    if changes.is_empty() {
-        return Ok(());
-    }
-    app.emit("mt::user-preference", changes).map_err(|err| err.to_string())
+    preferences.update(&app, changes)
 }
 
 #[cfg(test)]

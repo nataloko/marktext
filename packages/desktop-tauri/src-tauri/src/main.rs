@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 mod encoding;
+mod folders;
 mod preferences;
 mod recent;
 mod watch;
@@ -33,8 +34,8 @@ struct BootPaths {
 }
 
 // The `BootInfo` type in packages/desktop/src/shared/types/ipc.ts, plus the
-// window's id and the files to open, which Electron's main process would
-// send as tabs instead.
+// window's id and the files and folder to open, which Electron's main process
+// would send to the renderer instead.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BootInfo {
@@ -52,6 +53,7 @@ struct BootInfo {
     // The settings page to show first, if any.
     category: Option<String>,
     open_files: Vec<String>,
+    open_folder: Option<String>,
 }
 
 // Electron's BrowserWindow ids start at 1 and are never reused.
@@ -75,11 +77,11 @@ fn node_arch() -> &'static str {
     }
 }
 
-fn display(path: &Path) -> String {
+pub(crate) fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn is_markdown(path: &Path) -> bool {
+pub(crate) fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| MARKDOWN_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
@@ -103,7 +105,7 @@ fn resolve_lexically(base: &Path, path: &Path) -> PathBuf {
 // packages/desktop/src/main/filesystem/index.ts normalizeAndResolvePath: a
 // link is replaced by its target; other paths keep the folders they were
 // given through, so they match what the open dialog returns.
-fn resolve_cli_path(cwd: &Path, arg: &str) -> PathBuf {
+pub(crate) fn resolve_cli_path(cwd: &Path, arg: &str) -> PathBuf {
     let path = resolve_lexically(cwd, Path::new(arg));
     match std::fs::read_link(&path) {
         Ok(target) => resolve_lexically(path.parent().unwrap_or(&path), &target),
@@ -111,20 +113,33 @@ fn resolve_cli_path(cwd: &Path, arg: &str) -> PathBuf {
     }
 }
 
-// Markdown files named on a command line, resolved against `cwd`
-// (packages/desktop/src/main/filesystem/markdown.ts normalizeCliMarkdownPath).
-// Files that do not exist yet are passed on when their folder exists; folders
-// are skipped until the sidebar is ported.
-fn markdown_files(cwd: &Path, args: &[String]) -> Vec<String> {
-    args.iter()
-        .filter(|arg| !arg.starts_with('-'))
-        .map(|arg| resolve_cli_path(cwd, arg))
-        .filter(|path| {
-            is_markdown(path)
-                && (path.is_file() || (!path.exists() && path.parent().is_some_and(Path::is_dir)))
-        })
-        .map(|path| display(&path))
-        .collect()
+// The markdown files and the folders named on a command line, resolved
+// against `cwd` (packages/desktop/src/main/filesystem/markdown.ts
+// normalizeCliMarkdownPath). Files that do not exist yet are passed on when
+// their folder exists.
+fn cli_paths(cwd: &Path, args: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut files = Vec::new();
+    let mut folders = Vec::new();
+    for path in args.iter().filter(|arg| !arg.starts_with('-')).map(|arg| resolve_cli_path(cwd, arg)) {
+        if path.is_dir() {
+            folders.push(display(&path));
+        } else if is_markdown(&path) && (path.is_file() || (!path.exists() && path.parent().is_some_and(Path::is_dir))) {
+            files.push(display(&path));
+        }
+    }
+    (files, folders)
+}
+
+// main/app/index.ts ready: with nothing on the command line, the start up
+// action may name a folder to open.
+fn start_up_folder(preferences: &preferences::Preferences) -> Option<String> {
+    let key = match preferences.get("startUpAction")?.as_str()? {
+        "folder" => "defaultDirectoryToOpen",
+        "openLastFolder" => "lastOpenedFolder",
+        _ => return None,
+    };
+    let folder = preferences.get(key)?.as_str()?.to_string();
+    (!folder.is_empty() && Path::new(&folder).is_dir()).then_some(folder)
 }
 
 fn boot_info(
@@ -134,6 +149,7 @@ fn boot_info(
     window_type: &'static str,
     category: Option<String>,
     open_files: Vec<String>,
+    open_folder: Option<String>,
 ) -> BootInfo {
     let cwd = std::env::current_dir().unwrap_or_default();
     let version = env!("CARGO_PKG_VERSION").to_string();
@@ -169,6 +185,7 @@ fn boot_info(
         window_type,
         category,
         open_files,
+        open_folder,
     }
 }
 
@@ -304,6 +321,11 @@ fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
+fn is_directory(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
+#[tauri::command]
 fn toggle_devtools(window: tauri::WebviewWindow) {
     #[cfg(debug_assertions)]
     if window.is_devtools_open() {
@@ -326,10 +348,11 @@ fn window_builder<'a>(
     window_type: &'static str,
     category: Option<String>,
     open_files: Vec<String>,
+    open_folder: Option<String>,
 ) -> tauri::Result<tauri::WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let user_data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&user_data)?;
-    let boot = boot_info(app, &user_data, window_id, window_type, category, open_files);
+    let boot = boot_info(app, &user_data, window_id, window_type, category, open_files, open_folder);
     let script = format!("window.__MT_BOOT__ = {};", serde_json::to_string(&boot)?);
     Ok(tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
         .title("MarkText")
@@ -353,11 +376,16 @@ fn print_console_messages(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 }
 
 // One editor window (packages/desktop/src/main/windows/editor.ts).
-pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
+pub(crate) fn open_editor_window(
+    app: &AppHandle,
+    open_files: Vec<String>,
+    open_folder: Option<String>,
+) -> tauri::Result<()> {
     let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
-    let builder = window_builder(app, windows::label(window_id), window_id, "editor", None, open_files)?;
+    let label = windows::label(window_id);
+    let builder = window_builder(app, label, window_id, "editor", None, open_files, open_folder.clone())?;
     let registry = app.state::<windows::Windows>();
-    registry.add(window_id);
+    registry.add(window_id, open_folder);
     let window = builder
         .inner_size(1200.0, 800.0)
         .min_inner_size(400.0, 300.0)
@@ -382,7 +410,7 @@ async fn open_settings_window(app: AppHandle, category: Option<String>) -> Resul
     }
     let open = || -> tauri::Result<()> {
         let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
-        let window = window_builder(&app, SETTINGS_LABEL.into(), window_id, "settings", category, Vec::new())?
+        let window = window_builder(&app, SETTINGS_LABEL.into(), window_id, "settings", category, Vec::new(), None)?
             .inner_size(950.0, 650.0)
             .min_inner_size(450.0, 350.0)
             .minimizable(false)
@@ -447,8 +475,8 @@ fn quit_app(app: AppHandle) {
 
 // Async because building a window inside a synchronous command deadlocks on Windows.
 #[tauri::command]
-async fn new_editor_window(app: AppHandle, files: Vec<String>) -> Result<(), String> {
-    open_editor_window(&app, files).map_err(|err| err.to_string())
+async fn new_editor_window(app: AppHandle, files: Vec<String>, folder: Option<String>) -> Result<(), String> {
+    open_editor_window(&app, files, folder).map_err(|err| err.to_string())
 }
 
 fn main() {
@@ -464,6 +492,7 @@ fn main() {
             write_markdown_file,
             resolve_path,
             path_exists,
+            is_directory,
             toggle_devtools,
             new_editor_window,
             open_settings_window,
@@ -474,12 +503,14 @@ fn main() {
             windows::window_add_file,
             windows::window_change_file,
             windows::window_remove_file,
+            windows::window_open_folder,
             windows::window_ready,
             recent::recent_files,
             recent::add_recent_file,
             recent::clear_recent_files
         ])
         .manage(windows::Windows::default())
+        .manage(folders::Folders::default())
         .on_window_event(|window, event| {
             let Some(id) = windows::id_from_label(window.label()) else { return };
             match event {
@@ -487,18 +518,28 @@ fn main() {
                 tauri::WindowEvent::Destroyed => {
                     window.state::<windows::Windows>().remove(id);
                     window.state::<watch::FileWatcher>().unwatch_window(id);
+                    window.state::<folders::Folders>().close(id);
                 }
                 _ => {}
             }
         })
         .setup(|app| {
             let user_data = app.path().app_data_dir()?;
-            app.manage(preferences::Preferences::load(user_data.join("preferences.json")));
-            app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
-            app.manage(watch::FileWatcher::start(app.handle()));
+            let preferences = preferences::Preferences::load(user_data.join("preferences.json"));
             let cwd = std::env::current_dir().unwrap_or_default();
             let args: Vec<String> = std::env::args().skip(1).collect();
-            open_editor_window(app.handle(), markdown_files(&cwd, &args))?;
+            let (files, mut folders) = cli_paths(&cwd, &args);
+            if files.is_empty() && folders.is_empty() {
+                folders.extend(start_up_folder(&preferences));
+            }
+            app.manage(preferences);
+            app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
+            app.manage(watch::FileWatcher::start(app.handle()));
+            if files.is_empty() && folders.is_empty() {
+                open_editor_window(app.handle(), Vec::new(), None)?;
+            } else {
+                windows::open_paths(app.handle(), files, folders, false);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -521,17 +562,16 @@ mod tests {
     }
 
     #[test]
-    fn markdown_files_keeps_markdown_and_new_files() {
+    fn cli_paths_keeps_markdown_new_files_and_folders() {
         let dir = temp_dir("filter");
         std::fs::create_dir_all(dir.join("folder")).unwrap();
         std::fs::write(dir.join("notes.MD"), "").unwrap();
         std::fs::write(dir.join("image.png"), "").unwrap();
 
         let given = args(&["--new-window", "notes.MD", "image.png", "folder", "new.md", "gone/new.md", "folder/../x.md"]);
-        assert_eq!(
-            markdown_files(&dir, &given),
-            vec![display(&dir.join("notes.MD")), display(&dir.join("new.md")), display(&dir.join("x.md"))]
-        );
+        let (files, folders) = cli_paths(&dir, &given);
+        assert_eq!(files, vec![display(&dir.join("notes.MD")), display(&dir.join("new.md")), display(&dir.join("x.md"))]);
+        assert_eq!(folders, vec![display(&dir.join("folder"))]);
     }
 
     fn files_in(dir: &Path) -> Vec<String> {
@@ -580,6 +620,6 @@ mod tests {
         std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
         std::fs::write(dir.join("elsewhere/target.md"), "").unwrap();
         std::os::unix::fs::symlink("elsewhere/target.md", dir.join("link.md")).unwrap();
-        assert_eq!(markdown_files(&dir, &args(&["link.md"])), vec![display(&dir.join("elsewhere/target.md"))]);
+        assert_eq!(cli_paths(&dir, &args(&["link.md"])).0, vec![display(&dir.join("elsewhere/target.md"))]);
     }
 }

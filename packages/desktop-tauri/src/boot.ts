@@ -12,6 +12,8 @@ interface TauriBootInfo extends BootInfo {
   category: string | null
   // Absolute paths to open in this window.
   openFiles: string[]
+  // The folder for the sidebar, if any.
+  openFolder: string | null
 }
 
 declare global {
