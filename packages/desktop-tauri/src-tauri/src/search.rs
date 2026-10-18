@@ -678,8 +678,9 @@ mod tests {
         assert_eq!(options(Value::Null), None);
     }
 
-    fn text_folder() -> PathBuf {
-        let root = temp_dir("text");
+    // Each test needs a folder of its own: tests run side by side.
+    fn text_folder(name: &str) -> PathBuf {
+        let root = temp_dir(name);
         write(&root, "case.md", "Hello world\nsay hello\n");
         write(&root, "word.md", "foobar foo\n");
         write(&root, "regex.md", "a.c abc\n");
@@ -696,7 +697,7 @@ mod tests {
 
     #[test]
     fn text_search_matches_ripgrep_ts() {
-        let root = text_folder();
+        let root = text_folder("text-matches");
 
         // Case-insensitive by default; binary files are skipped.
         let found = text(&root, "hello", json!({}));
@@ -737,7 +738,7 @@ mod tests {
 
     #[test]
     fn text_search_honours_hidden_ignore_size_and_globs() {
-        let root = text_folder();
+        let root = text_folder("text-options");
         assert!(text(&root, "secret", json!({})).is_empty());
         assert_eq!(names(&text(&root, "secret", json!({ "includeHidden": true }))), vec![".hidden.md"]);
         assert_eq!(names(&text(&root, "secret", json!({ "noIgnore": true }))), vec!["ignored.md"]);
