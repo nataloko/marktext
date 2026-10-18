@@ -706,7 +706,10 @@ mod tests {
         touch_later(&root.join("b.md"));
 
         tree.refresh(&Round { everything: true, ..Round::default() }, &mut log);
-        let position = |path: &str| log.0.iter().position(|(_, logged)| *logged == display(&root.join(path))).unwrap();
+        let position = |path: &str| {
+            let path = display(&root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)));
+            log.0.iter().position(|(_, logged)| *logged == path).unwrap()
+        };
         assert!(position("sub/c.md") < position("sub"), "children go first: {:?}", log.0);
         assert_eq!(
             log.take(&root),
