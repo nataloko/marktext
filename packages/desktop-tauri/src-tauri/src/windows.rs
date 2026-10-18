@@ -359,7 +359,8 @@ pub fn report_watch_limit(window: &WebviewWindow, message: String) {
 // Watches a file this window opened, and tells the user once when the OS
 // limit on watches is reached.
 fn watch_file(window: &WebviewWindow, watcher: &FileWatcher, path: &str, id: u32) {
-    if let Some(message) = watcher.watch(path, id) {
+    let polled = crate::watch::uses_polling(window.app_handle(), Path::new(path));
+    if let Some(message) = watcher.watch(path, id, polled) {
         report_watch_limit(window, message);
     }
 }

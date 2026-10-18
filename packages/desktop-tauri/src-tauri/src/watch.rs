@@ -6,27 +6,55 @@
 // Electron) and reported to each window whose last read or write of it had
 // different content. A window's own saves therefore stay quiet for that
 // window, while other windows with the file open still hear about them, as
-// Electron's per window ignore list does.
-//
-// Not ported yet: polling for network drives and the watcherUsePolling
-// preference.
+// Electron's per window ignore list does. A folder on a network share, or
+// any folder with the watcherUsePolling preference, is polled instead.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventHandler, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::preferences::Preferences;
 use crate::windows::label;
 
 const SETTLE: Duration = Duration::from_millis(1000);
 const TICK: Duration = Duration::from_millis(150);
+// chokidar polls every 100 ms; a network share is spared that.
+const POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+// watcher.ts: the OS may report no changes on a network share, so a UNC path
+// is polled, as every path is with the watcherUsePolling preference. Electron
+// polls on macOS too.
+pub fn uses_polling(app: &AppHandle, path: &Path) -> bool {
+    let preferred = app
+        .try_state::<Preferences>()
+        .and_then(|preferences| preferences.get("watcherUsePolling"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    preferred || is_unc(path)
+}
+
+// watcher.ts isUncPath: /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+/, a server and a share.
+fn is_unc(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    let Some(rest) = path.strip_prefix(r"\\").or_else(|| path.strip_prefix("//")) else { return false };
+    let mut parts = rest.splitn(2, ['\\', '/']);
+    let server = parts.next().unwrap_or("");
+    let share = parts.next().unwrap_or("");
+    !server.is_empty() && !share.is_empty() && !share.starts_with(['\\', '/'])
+}
+
+// Changes are found by comparing modification times.
+pub fn poll_watcher<F: EventHandler>(handler: F) -> notify::Result<PollWatcher> {
+    PollWatcher::new(handler, notify::Config::default().with_poll_interval(POLL_INTERVAL))
+}
 
 // Sent to a window that has the file open; the page loads it and tells the
 // renderer (`mt::update-file`).
@@ -64,12 +92,17 @@ struct Folder {
     files: usize,
     // False until the OS accepted the watch; the next file retries.
     watching: bool,
+    // Watched by the poller rather than the OS.
+    polled: bool,
 }
 
 // Maps are keyed by `key(path)`.
 #[derive(Default)]
 struct State {
     watcher: Option<RecommendedWatcher>,
+    // Started when the first folder needs it, with this sender.
+    poller: Option<PollWatcher>,
+    events: Option<Sender<notify::Result<notify::Event>>>,
     files: HashMap<PathBuf, Watched>,
     folders: HashMap<PathBuf, Folder>,
     known: HashMap<PathBuf, Known>,
@@ -122,19 +155,42 @@ impl State {
         let folder = self
             .folders
             .entry(key(parent))
-            .or_insert_with(|| Folder { path: parent.to_path_buf(), files: 0, watching: false });
+            .or_insert_with(|| Folder { path: parent.to_path_buf(), files: 0, watching: false, polled: false });
         folder.files += 1;
         (!folder.watching).then(|| folder.path.clone())
     }
 
-    fn folder_watched(&mut self, folder: &Path) {
+    fn folder_watched(&mut self, folder: &Path, polled: bool) {
         if let Some(folder) = self.folders.get_mut(&key(folder)) {
             folder.watching = true;
+            folder.polled = polled;
         }
     }
 
-    // Returns the folder to stop watching, if it holds no watched file any more.
-    fn drop_window(&mut self, path: &Path, window: u32) -> Option<PathBuf> {
+    fn watcher(&mut self, polled: bool) -> Option<&mut dyn Watcher> {
+        if !polled {
+            return self.watcher.as_mut().map(|watcher| watcher as &mut dyn Watcher);
+        }
+        if self.poller.is_none() {
+            let sender = self.events.clone()?;
+            self.poller = poll_watcher(move |event| {
+                let _ = sender.send(event);
+            })
+            .inspect_err(|err| eprintln!("[watch] cannot poll files: {err}"))
+            .ok();
+        }
+        self.poller.as_mut().map(|poller| poller as &mut dyn Watcher)
+    }
+
+    fn unwatch(&mut self, (folder, polled): (PathBuf, bool)) {
+        if let Some(watcher) = self.watcher(polled) {
+            let _ = watcher.unwatch(&folder);
+        }
+    }
+
+    // Returns the folder to stop watching, and whether it is polled, if it
+    // holds no watched file any more.
+    fn drop_window(&mut self, path: &Path, window: u32) -> Option<(PathBuf, bool)> {
         let file_key = key(path);
         if let Some(known) = self.known.get_mut(&file_key) {
             known.remove(&window);
@@ -153,7 +209,7 @@ impl State {
             return None;
         }
         let folder = self.folders.remove(&folder_key)?;
-        folder.watching.then_some(folder.path)
+        folder.watching.then_some((folder.path, folder.polled))
     }
 
     fn note(&mut self, event: notify::Event) {
@@ -215,14 +271,15 @@ impl FileWatcher {
     // Starts the OS watcher and the thread that turns its events into reports.
     pub fn start(app: &AppHandle) -> Self {
         let (sender, events) = std::sync::mpsc::channel();
+        let os_sender = sender.clone();
         let watcher = notify::recommended_watcher(move |event| {
-            let _ = sender.send(event);
+            let _ = os_sender.send(event);
         })
         .inspect_err(|err| eprintln!("[watch] cannot watch files: {err}"))
         .ok();
         let handle = app.clone();
         std::thread::spawn(move || run(handle, events));
-        Self(Mutex::new(State { watcher, ..State::default() }))
+        Self(Mutex::new(State { watcher, events: Some(sender), ..State::default() }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -246,12 +303,12 @@ impl FileWatcher {
     }
 
     // Returns a message for the user when the OS refuses another watch.
-    pub fn watch(&self, path: &str, window: u32) -> Option<String> {
+    pub fn watch(&self, path: &str, window: u32, polled: bool) -> Option<String> {
         let mut state = self.lock();
         let folder = state.add(Path::new(path), window)?;
-        match state.watcher.as_mut()?.watch(&folder, RecursiveMode::NonRecursive) {
+        match state.watcher(polled)?.watch(&folder, RecursiveMode::NonRecursive) {
             Ok(()) => {
-                state.folder_watched(&folder);
+                state.folder_watched(&folder, polled);
                 None
             }
             Err(err) if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) && !state.limit_reported => {
@@ -268,9 +325,7 @@ impl FileWatcher {
     pub fn unwatch(&self, path: &str, window: u32) {
         let mut state = self.lock();
         if let Some(folder) = state.drop_window(Path::new(path), window) {
-            if let Some(watcher) = state.watcher.as_mut() {
-                let _ = watcher.unwatch(&folder);
-            }
+            state.unwatch(folder);
         }
     }
 
@@ -279,9 +334,7 @@ impl FileWatcher {
         let paths: Vec<PathBuf> = state.files.values().map(|watched| watched.path.clone()).collect();
         for path in paths {
             if let Some(folder) = state.drop_window(&path, window) {
-                if let Some(watcher) = state.watcher.as_mut() {
-                    let _ = watcher.unwatch(&folder);
-                }
+                state.unwatch(folder);
             }
         }
         for known in state.known.values_mut() {
@@ -339,6 +392,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unc_paths_name_a_server_and_a_share() {
+        assert!(is_unc(Path::new(r"\\server\share\notes\a.md")));
+        assert!(is_unc(Path::new("//server/share")));
+        assert!(!is_unc(Path::new(r"\\server")));
+        assert!(!is_unc(Path::new(r"\\server\")));
+        assert!(!is_unc(Path::new(r"C:\notes\a.md")));
+        assert!(!is_unc(Path::new("/home/me/a.md")));
+        assert!(!is_unc(Path::new("///x/y")));
+    }
+
+    #[test]
     fn only_real_changes_are_reported() {
         assert_eq!(compare(Some(Some(1)), Some(1)), None);
         assert_eq!(compare(Some(Some(1)), Some(2)), Some(Kind::Change));
@@ -354,13 +418,19 @@ mod tests {
         let mut state = State::default();
         let folder = PathBuf::from("/notes");
         assert_eq!(state.add(Path::new("/notes/a.md"), 1), Some(folder.clone()));
-        state.folder_watched(&folder);
+        state.folder_watched(&folder, false);
         assert_eq!(state.add(Path::new("/notes/b.md"), 1), None);
         assert_eq!(state.add(Path::new("/notes/a.md"), 2), None);
         assert_eq!(state.drop_window(Path::new("/notes/a.md"), 1), None);
         assert_eq!(state.drop_window(Path::new("/notes/a.md"), 2), None);
-        assert_eq!(state.drop_window(Path::new("/notes/b.md"), 1), Some(folder));
+        assert_eq!(state.drop_window(Path::new("/notes/b.md"), 1), Some((folder, false)));
         assert!(state.files.is_empty() && state.folders.is_empty());
+
+        // A polled folder is unwatched from the poller.
+        let share = PathBuf::from("//server/share");
+        assert_eq!(state.add(Path::new("//server/share/a.md"), 1), Some(share.clone()));
+        state.folder_watched(&share, true);
+        assert_eq!(state.drop_window(Path::new("//server/share/a.md"), 1), Some((share, true)));
     }
 
     #[test]
@@ -369,7 +439,7 @@ mod tests {
         let folder = PathBuf::from("/notes");
         assert_eq!(state.add(Path::new("/notes/a.md"), 1), Some(folder.clone()));
         assert_eq!(state.add(Path::new("/notes/b.md"), 1), Some(folder.clone()));
-        state.folder_watched(&folder);
+        state.folder_watched(&folder, false);
         assert_eq!(state.add(Path::new("/notes/c.md"), 1), None);
     }
 

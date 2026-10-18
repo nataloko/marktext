@@ -837,6 +837,20 @@ shows the success notice. Checked in the Windows VM (a local MinGW build of
 store), and Save PNG writing the server's PNG through the "Save diagram"
 dialog with the success notice.
 
+File watching by polling (2026-10-18): as in Electron's `watcher.ts`, a UNC
+path (`\\server\share\...` or `//server/share/...`) is polled, and so is every
+path when the `watcherUsePolling` preference is on (it has no switch in
+Settings; Electron also polls on macOS). `src-tauri/src/watch.rs` starts a
+`notify` PollWatcher beside the OS watcher the first time an open document's
+folder needs it, and the sidebar folder's thread (`folders.rs`) uses one
+instead of the OS watcher for such a folder. It compares modification times
+every second (chokidar polls every 100 ms). A mapped drive letter such as the
+VM's Z: is not a UNC path, so it is watched the usual way, as in Electron.
+Checked on Xvfb with the preference on: the process runs notify's poll
+threads, an outside change to the open document and a file added or deleted
+in the sidebar folder show, and a save from MarkText stays quiet; with it off
+there are only the OS watcher threads and changes still show.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -919,7 +933,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Missing | Electron code / channel |
 |---|---|
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
-| File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |

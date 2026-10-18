@@ -4,10 +4,9 @@
 // batches that the page passes on to the renderer as `mt::update-object-tree`
 // (src/folders.ts). What an OS event says happened differs between platforms,
 // so the thread mostly does not rely on it: it lists each folder that had
-// events again and compares the result with what it sent before.
-//
-// Not ported yet: polling for network drives and the watcherUsePolling
-// preference.
+// events again and compares the result with what it sent before. A folder
+// on a network share, or any folder with the watcherUsePolling preference, is
+// polled (src/watch.rs uses_polling).
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -20,13 +19,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobMatcher};
 use notify::event::ModifyKind;
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::display;
 use crate::preferences::Preferences;
+use crate::watch::{poll_watcher, uses_polling};
 use crate::windows::{label, report_watch_limit};
 
 const FOLDER_EVENT: &str = "mt::tauri::folder";
@@ -167,7 +167,7 @@ trait Out {
 }
 
 struct Watches {
-    watcher: Option<RecommendedWatcher>,
+    watcher: Option<Box<dyn Watcher>>,
     // The OS refused a watch for want of resources; reported once.
     limit: Option<String>,
     limit_reported: bool,
@@ -234,7 +234,7 @@ struct Tree {
 }
 
 impl Tree {
-    fn new(root: PathBuf, filter: Filter, watcher: Option<RecommendedWatcher>) -> Self {
+    fn new(root: PathBuf, filter: Filter, watcher: Option<Box<dyn Watcher>>) -> Self {
         let watches = Watches { watcher, limit: None, limit_reported: false };
         let real_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         Self { real_root, filter, watches, folders: HashMap::new(), links: HashMap::new() }
@@ -493,11 +493,15 @@ impl Out for Page {
 
 fn run(app: AppHandle, window: u32, generation: u64, root: PathBuf, stop: Arc<AtomicBool>) {
     let (sender, events) = std::sync::mpsc::channel();
-    let watcher = notify::recommended_watcher(move |event| {
+    let handler = move |event| {
         let _ = sender.send(event);
-    })
-    .inspect_err(|err| eprintln!("[folders] cannot watch folders: {err}"))
-    .ok();
+    };
+    let watcher: notify::Result<Box<dyn Watcher>> = if uses_polling(&app, &root) {
+        poll_watcher(handler).map(|watcher| Box::new(watcher) as Box<dyn Watcher>)
+    } else {
+        notify::recommended_watcher(handler).map(|watcher| Box::new(watcher) as Box<dyn Watcher>)
+    };
+    let watcher = watcher.inspect_err(|err| eprintln!("[folders] cannot watch folders: {err}")).ok();
     let filter = Filter::new(exclude_patterns(&app));
     let mut page = Page { app, window, generation, stop, changes: Vec::new() };
     page.send(Some(&display(&root)));
