@@ -267,7 +267,13 @@ On the 16 core desktop a cold release build takes ~3.5 min.
 node_modules/.bin/eslint packages/desktop-tauri/src packages/desktop-tauri/vite.config.ts
 pnpm --filter marktext-tauri typecheck
 (cd packages/desktop-tauri/src-tauri && cargo test && cargo clippy --all-targets)
+# Windows only code, checked from Linux (no linking, so no Windows SDK needed):
+(cd packages/desktop-tauri/src-tauri && CARGO_TARGET_DIR=target/wincheck cargo clippy --target x86_64-pc-windows-gnu)
 ```
+
+The Windows check needs Fedora's `rust-std-static-x86_64-pc-windows-gnu`,
+`mingw64-binutils` and `mingw64-gcc` in the distrobox (installed on
+2026-10-18). The CI still builds the real MSVC installer.
 
 The existing Rust code is not formatted with rustfmt defaults, so `cargo fmt`
 would reformat whole files; keep to the surrounding style instead.
