@@ -20,6 +20,7 @@ mod folders;
 mod fonts;
 mod images;
 mod keybindings;
+mod pandoc;
 mod preferences;
 mod print;
 mod recent;
@@ -612,7 +613,12 @@ fn main() {
             cmd::cmd_exists,
             fetch::fetch_link_html,
             fetch::fetch_plantuml,
-            uploader::upload_image
+            uploader::upload_image,
+            pandoc::pandoc_command,
+            pandoc::pandoc_import,
+            pandoc::pandoc_reader_extensions,
+            pandoc::pandoc_linked_media,
+            pandoc::pandoc_export
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())

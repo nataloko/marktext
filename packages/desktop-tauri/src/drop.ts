@@ -16,8 +16,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { appWindow, boot, isWindows } from './boot'
 import { emitToRenderer, onSend } from './electron'
 import { openFileOrFolder } from './folders'
+import { importWithPandoc, noticePandocNotFound, pandocCommand } from './pandoc'
 import { PANDOC_EXTENSIONS } from './stand-ins/main/config'
-import { notAvailable } from './stand-ins/notAvailable'
 import { IMAGE_EXTENSIONS } from './userData'
 
 interface WebView2Host {
@@ -41,7 +41,8 @@ const openDropped = async(paths: string[]): Promise<void> => {
       continue
     }
     if (PANDOC_EXTENSIONS.some((ext) => pathname.endsWith(ext))) {
-      notAvailable('Import with pandoc')
+      if (await pandocCommand()) await importWithPandoc(pathname)
+      else noticePandocNotFound()
       break
     }
   }

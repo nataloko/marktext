@@ -107,7 +107,7 @@ This branch (`tauri-trial`) runs MarkText on [Tauri](https://tauri.app) instead 
 
 - **Image uploads (PicGo or your own script):** not fully tested. Tried only on Linux with stand-in programs, and not on Windows.
 - **Spell checking:** not available yet.
-- **Pandoc import and export:** not available yet.
+- **Pandoc import and export:** not tested on Windows yet. Needs [pandoc](https://pandoc.org) installed.
 - **Automatic updates:** not available.
 
 <h2 align="center">Sponsors</h2>

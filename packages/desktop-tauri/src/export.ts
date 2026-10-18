@@ -82,10 +82,10 @@ const pageMargins = (): Margins => {
 }
 
 // file.ts sanitizeFilename.
-const sanitizeFilename = (name?: string): string =>
+export const sanitizeFilename = (name?: string): string =>
   (name || '').replace(/[/\\:*?"<>|]/g, '-').trim() || 'Untitled'
 
-const exportFolder = async(pathname?: string): Promise<string> => {
+export const exportFolder = async(pathname?: string): Promise<string> => {
   if (pathname) return path.dirname(pathname)
   try {
     return await documentDir()

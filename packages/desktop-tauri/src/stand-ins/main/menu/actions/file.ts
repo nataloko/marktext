@@ -8,9 +8,9 @@ import type { MenuItem } from 'electron'
 import type { MenuWindow } from '../../../../appMenu'
 import { showOpenDialog } from '../../../../files'
 import { openFileOrFolder as openPath, showOpenFolderDialog } from '../../../../folders'
+import { exportWithPandoc as convertWithPandoc, importFile as importWithPandoc } from '../../../../pandoc'
 import { setPreferences } from '../../../../preferences'
 import { newWindow } from '../../../../window'
-import { notAvailable } from '../../../notAvailable'
 
 type Win = MenuWindow | null | undefined
 
@@ -52,8 +52,12 @@ export const autoSave = (menuItem: MenuItem): void => {
 
 export const moveTo = (win: Win): void => send(win, 'mt::editor-move-file')
 export const rename = (win: Win): void => send(win, 'mt::editor-rename-file')
-export const importFile = (): void => notAvailable('Import with pandoc')
-export const exportWithPandoc = (): void => notAvailable('Export with pandoc')
+export const importFile = (): void => {
+  void importWithPandoc()
+}
+export const exportWithPandoc = (_win: Win, id: string): void => {
+  void convertWithPandoc(id)
+}
 export const exportFile = (win: Win, type: string): void => send(win, 'mt::show-export-dialog', type)
 export const printDocument = (win: Win): void => send(win, 'mt::show-export-dialog', 'print')
 export const closeTab = (win: Win): void => send(win, 'mt::editor-close-tab')

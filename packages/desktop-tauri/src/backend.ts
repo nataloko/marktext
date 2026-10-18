@@ -44,6 +44,7 @@ import {
   preferredEol,
   setPreferences
 } from './preferences'
+import { registerPandoc } from './pandoc'
 import { registerSearch } from './search'
 import {
   defaultKeybindings,
@@ -374,6 +375,7 @@ const registerHandlers = (): void => {
   registerSearch()
   registerDrop()
   registerExport()
+  registerPandoc()
 
   onInvoke('mt::i18n::load', async(language: string) => {
     const load = translations[`../../desktop/static/locales/${language}.json`]

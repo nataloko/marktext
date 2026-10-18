@@ -374,7 +374,7 @@ Typewriter and Focus greyed and Format greyed, Always on Top, Follow System
 Theme and a theme change through the reused theme actions, Open Recent from
 Rust's `recently-used-documents.json`). Quit now closes every window, each
 asking about its own unsaved documents. Not available yet, with a notice:
-pandoc import and export, Check for Updates.
+Check for Updates (pandoc came later, see "Pandoc import and export").
 Known problems:
 - Cut, Copy and Paste in the Edit menu first did nothing: GTK's built in items
   do not act on the WebKit page. Fixed by `main.rs editing_command`, which runs
@@ -576,7 +576,7 @@ handler stops WebView2 calling the ones after it (found in the VM with
 logging). wry passes the string on to Tauri, which prints a "JSON error" in
 the page's console for each drop; harmless. Handling as
 in Electron (`main/menu/actions/file.ts` mt::window::drop): markdown files
-open, a file pandoc converts gets the "not available" notice, folders and
+open, a file pandoc converts is imported (since the pandoc stage), folders and
 other files are ignored. Every window now also refuses to navigate away from
 the app's own page, as Electron's `will-navigate` handler does. Checked on
 Xvfb with a GTK drag source (`packages/desktop-tauri/scripts/drag-source.py`,
@@ -910,6 +910,34 @@ address inserted, the script picked and saved on the Image page getting the
 temporary file as its one argument and its address inserted, and the
 temporary folders gone afterwards. Not tried on Windows.
 
+Pandoc import and export (2026-10-19): `src-tauri/src/pandoc.rs` finds pandoc
+as `main/utils/pandoc.ts` does (the `MARKTEXT_PANDOC` override, pandoc's
+Windows install folders, then the lookup in `cmd.rs` with the login shell's
+PATH) and runs it through fixed commands: import (`pandoc -s <file> -t
+markdown`), the gfm and markdown readers' extension listings, the linked
+images of a document (from `-t json`), and export (`-f <reader> -t <target>
+-s [--metadata] [--extract-media=. --resource-path] -o <file>`, the document
+on stdin). The page never passes arguments of its own, since pandoc's
+`--filter` would run any program: Rust checks the target against the menu's
+formats and the reader against `gfm` or `markdown` with extension switches,
+and takes only absolute paths to import. `src/pandoc.ts` is the flow from
+`menu/actions/file.ts`: File > Import (open dialog, then a new untitled tab),
+Convert with Pandoc (the renderer's `mt::response-pandoc-export`, the save
+dialog, warnings as a notice of up to five lines, the success notice), the
+"pandoc not found" notice with its link to pandoc.org, the drop of a file
+pandoc reads, and the General page's `mt::pandoc::command`. The helpers that
+build the reader and decide whether images are copied along live in the
+`main/utils/pandoc` stand-in, copied from the original. Differences: a failed
+import shows an error (Electron opened an empty tab), and an import opens in
+the current window even with "open files in new window" on (a new window
+cannot be given text yet). Checked on Xvfb with Fedora's pandoc 3.7 in the
+distrobox: the General page finds `/usr/bin/pandoc` and its switch shows the
+menu; Word export with the picture embedded and the success notice; LaTeX
+export into another folder with the picture copied to `img/` there and the
+"links pictures" notice; importing the Word file into an untitled tab; and
+with `MARKTEXT_PANDOC` set to a missing file, the "Pandoc was not found"
+notice. Not tried on Windows.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -991,9 +1019,8 @@ port. Unhandled channels are logged in debug builds (section 3).
 
 | Missing | Electron code / channel |
 |---|---|
-| ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
+| ☰ menu: Check for Updates (see section 5) | `src/main/menu/actions/` |
 | Spellcheck (deferred; work so far on the local branch `tauri-spellcheck-wip`, see below) | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
-| Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |
 
 Paths in this table are relative to `packages/desktop/`.
