@@ -624,6 +624,36 @@ then the ☰ menu, file watching and encodings.
    `backend.ts` or Rust. Worth a script that lists main process changes since
    the last sync.
 
+### Linux release: AppImage only, at release time
+
+Linux ships as an AppImage and nothing else; Windows as the NSIS installer
+CI already builds. Packaging waits until a release is near. Follow the user's
+other projects (Sterna is the model, sch-pdf-compare the same; survey of
+2026-10-18):
+- Build in a release container pinned by digest, separate from the
+  development box, with one `packaging/appimage/toolchain.env` for the pinned
+  inputs (Sterna `packaging/appimage/toolchain.env`). Add a MarkText case to
+  `~/Projects/dev-setup/package-linux.sh` and `projects.json`; `./dev
+  package` builds into `~/Projects/Releases/marktext/` and never publishes
+  (`dev-setup/collect-appimage.sh`).
+- Pinned linuxdeploy and appimagetool versions, `APPIMAGE_EXTRACT_AND_RUN=1`
+  in rootless containers, a check that no shipped ELF needs a newer glibc
+  than the floor, GLVND frontends only (never Mesa or NVIDIA), and
+  `gh-releases-zsync|nataloko|marktext|latest|marktext-x86_64.AppImage.zsync`
+  update information checked with `readelf --string-dump=.upd_info`.
+- Release flow: tag pushes build a draft GitHub release; signing stays
+  offline (Sterna `packaging/RELEASING.md`, `packaging/release.sh`).
+- Where MarkText differs: the other projects build on manylinux_2_28
+  (glibc 2.28), which has no WebKitGTK 4.1 or libsoup3. Choose the base first;
+  Ubuntu 22.04 (glibc 2.35) is the likely floor. Bundling WebKitGTK (its
+  WebProcess and NetworkProcess helpers) makes the image large and is where
+  AppImages of Tauri apps usually break on other distros (EGL and graphics
+  drivers), so do one throwaway CI build and test on Fedora and Ubuntu before
+  release week. Try `tauri build --bundles appimage` in the container with
+  linuxdeploy pre-seeded at the pinned version; fall back to a Sterna style
+  AppRun only if needed. Trim `bundle.targets` in `src-tauri/tauri.conf.json`
+  to `appimage` and `nsis`.
+
 ## 9. Lessons from the old machine
 
 - `WEBKIT_DISABLE_COMPOSITING_MODE=1` (and `LIBGL_ALWAYS_SOFTWARE=1`) made
