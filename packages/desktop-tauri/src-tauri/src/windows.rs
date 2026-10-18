@@ -208,22 +208,26 @@ fn editor_id(window: &WebviewWindow) -> Option<u32> {
     id_from_label(window.label())
 }
 
-// Messages Rust has for this window's renderer; the page passes them on.
+// Messages Rust has for a window's renderer; its page passes them on.
 #[derive(Clone, serde::Serialize)]
 struct RendererMessage {
     channel: &'static str,
     args: Vec<serde_json::Value>,
 }
 
+pub fn send_to_renderer(window: &WebviewWindow, channel: &'static str, args: Vec<serde_json::Value>) {
+    let message = RendererMessage { channel, args };
+    if let Err(err) = window.emit_to(window.label(), "mt::tauri::renderer-message", message) {
+        eprintln!("[windows] {err}");
+    }
+}
+
 // Watches a file this window opened, and tells the user once when the OS
 // limit on watches is reached (watcher.ts reports ENOSPC the same way).
 fn watch_file(window: &WebviewWindow, watcher: &FileWatcher, path: &str, id: u32) {
     let Some(message) = watcher.watch(path, id) else { return };
-    let notification = RendererMessage {
-        channel: "mt::show-notification",
-        args: vec![serde_json::json!({ "title": "inotify limit reached", "type": "warning", "message": message })],
-    };
-    let _ = window.emit_to(window.label(), "mt::tauri::renderer-message", notification);
+    let notification = serde_json::json!({ "title": "inotify limit reached", "type": "warning", "message": message });
+    send_to_renderer(window, "mt::show-notification", vec![notification]);
 }
 
 // Returns false when the window already has the file open, so the page

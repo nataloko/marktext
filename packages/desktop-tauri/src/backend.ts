@@ -5,11 +5,11 @@
 // Anything not handled is logged once by ./electron.
 
 import { invoke } from '@tauri-apps/api/core'
-import { ask } from '@tauri-apps/plugin-dialog'
+import { ask, open as openDialog } from '@tauri-apps/plugin-dialog'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import { registerMenuHandlers } from './appMenu'
-import { appWindow, boot, isWindows } from './boot'
+import { appWindow, boot, isSettings, isWindows } from './boot'
 import { emitToRenderer, onInvoke, onSend, onSendSync, whenListening } from './electron'
 import {
   listenForFileChanges,
@@ -29,11 +29,13 @@ import {
   setPreferences
 } from './preferences'
 import { defaultKeybindings, installShortcuts } from './shortcuts'
+import { notAvailable } from './stand-ins/notAvailable'
 import {
   closeWindow,
   fullscreen,
   installWindowEvents,
   newWindow,
+  openSettings,
   quitApp,
   setFullscreen
 } from './window'
@@ -49,7 +51,8 @@ const setWindowUrlParams = (): void => {
     udp: boot.paths.userData,
     debug: import.meta.env.DEV ? '1' : '0',
     wid: String(boot.windowId),
-    type: 'editor',
+    // The router shows /preference for "settings", /spelling for "settings/spelling".
+    type: isSettings ? (boot.category ? `settings/${boot.category}` : 'settings') : 'editor',
     cff: String(preferences.codeFontFamily ?? ''),
     cfs: String(preferences.codeFontSize),
     hsb: preferences.hideScrollbar ? '1' : '0',
@@ -143,6 +146,9 @@ const runCommand = (id: string): boolean => {
     switch (id) {
       case 'file.new-window':
         void newWindow()
+        break
+      case 'file.preferences':
+        void openSettings()
         break
       case 'file.new-tab':
         emitToRenderer('mt::new-untitled-tab')
@@ -254,10 +260,12 @@ const registerHandlers = (): void => {
     invoke('window_remove_file', { path: pathname })
   )
   onSend('mt::cmd-new-editor-window', newWindow)
+  onSend('mt::open-setting-window', (category?: string) => openSettings(category))
   onSend('mt::response-file-save', (...args: SaveRequest) => saveTab(false, ...args))
   onSend('mt::response-file-save-as', (...args: SaveRequest) => saveTab(true, ...args))
 
-  onSend('mt::win::close', () => emitToRenderer('mt::ask-for-close'))
+  // Settings has no unsaved documents and closes at once (windows/setting.ts).
+  onSend('mt::win::close', () => (isSettings ? closeWindow() : emitToRenderer('mt::ask-for-close')))
   onSend('mt::close-window', closeWindow)
   onSend('mt::close-window-confirm', async(unsavedFiles: unknown[]) => {
     const discard = await ask(
@@ -289,6 +297,30 @@ const registerHandlers = (): void => {
     const load = translations[`../../desktop/static/locales/${language}.json`]
     return load ? load() : null
   })
+
+  // ---- settings pages ----
+  // index.ts mt::select-default-directory-to-open.
+  onSend('mt::select-default-directory-to-open', async() => {
+    const directory = await openDialog({ directory: true })
+    if (typeof directory === 'string') await setPreferences({ defaultDirectoryToOpen: directory })
+  })
+  // The Keybindings page lists the defaults; saving custom ones is not ported
+  // yet. No keymap makes the page fall back to the US layout.
+  onInvoke('mt::keybinding-get-keyboard-info', () => ({ layout: null, keymap: null }))
+  onInvoke('mt::keybinding-get-pref-keybindings', () => ({
+    defaultKeybindings: new Map(keybindings),
+    userKeybindings: new Map()
+  }))
+  onInvoke('mt::keybinding-save-user-keybindings', () => {
+    notAvailable('Custom keyboard shortcuts')
+    return false
+  })
+  // Chromium's spellchecker dictionaries have no counterpart in the webviews;
+  // empty answers keep the Spelling page from throwing.
+  onInvoke('mt::spellchecker-get-available-dictionaries', () => [])
+  onInvoke('mt::spellchecker-get-custom-dictionary-words', () => [])
+  onInvoke('mt::spellchecker-switch-language', () => null)
+  onInvoke('mt::spellchecker-remove-word', () => false)
 
   // Session restore is out of scope; the renderer only needs a resolved promise.
   onInvoke('update-buffer-state', () => true)
@@ -343,9 +375,11 @@ export const startBackend = async(): Promise<void> => {
   await listenForPreferences()
   await loadPreferences()
   setWindowUrlParams()
-  installShortcuts(keybindings, runCommand)
   await installWindowEvents()
   await listenForRendererMessages()
+  // The settings window has no documents, menu or editor shortcuts.
+  if (isSettings) return
+  installShortcuts(keybindings, runCommand)
   await listenForFileChanges()
   await listenForFiles()
   opening = bootEditor()

@@ -7,6 +7,9 @@ import type { BootInfo } from '@shared/types/ipc'
 
 interface TauriBootInfo extends BootInfo {
   windowId: number
+  windowType: 'editor' | 'settings'
+  // The settings page to show first, if any.
+  category: string | null
   // Absolute paths to open in this window.
   openFiles: string[]
 }
@@ -21,3 +24,4 @@ export const boot = window.__MT_BOOT__
 export const isWindows = boot.platform === 'win32'
 export const path = createPlatformPath(isWindows)
 export const appWindow = getCurrentWindow()
+export const isSettings = boot.windowType === 'settings'

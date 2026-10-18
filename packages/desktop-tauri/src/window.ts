@@ -1,7 +1,7 @@
 // This window's controls and the window events the renderer listens for.
 
 import { invoke } from '@tauri-apps/api/core'
-import { appWindow } from './boot'
+import { appWindow, isSettings } from './boot'
 import { emitToRenderer } from './electron'
 
 let isFullscreen = false
@@ -24,6 +24,10 @@ export const toggleAlwaysOnTop = async(): Promise<void> => {
 
 export const newWindow = (): Promise<unknown> => invoke('new_editor_window', { files: [] })
 
+// One settings window for the app (src-tauri/src/main.rs open_settings_window).
+export const openSettings = (category?: string): Promise<unknown> =>
+  invoke('open_settings_window', { category: category ?? null })
+
 export const closeWindow = async(): Promise<void> => {
   await appWindow.destroy()
 }
@@ -42,10 +46,12 @@ export const installWindowEvents = async(): Promise<void> => {
   await appWindow.onFocusChanged(({ payload }) => {
     emitToRenderer('mt::window-active-status', { status: payload })
   })
-  // The window manager's close (Alt+F4) asks the renderer about unsaved tabs first.
+  // The window manager's close (Alt+F4) asks the renderer about unsaved tabs
+  // first; the settings window has none and closes at once (windows/setting.ts).
   await appWindow.onCloseRequested((event) => {
     event.preventDefault()
-    emitToRenderer('mt::ask-for-close')
+    if (isSettings) void closeWindow()
+    else emitToRenderer('mt::ask-for-close')
   })
 
   // Electron copies document.title into the window title; Tauri does not.

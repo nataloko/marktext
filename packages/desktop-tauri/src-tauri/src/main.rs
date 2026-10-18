@@ -47,6 +47,10 @@ struct BootInfo {
     #[serde(rename = "MARKDOWN_INCLUSIONS")]
     markdown_inclusions: Vec<String>,
     window_id: u32,
+    // "editor" or "settings" (packages/desktop/src/main/windows/base.ts type).
+    window_type: &'static str,
+    // The settings page to show first, if any.
+    category: Option<String>,
     open_files: Vec<String>,
 }
 
@@ -123,7 +127,14 @@ fn markdown_files(cwd: &Path, args: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn boot_info(app: &AppHandle, user_data: &Path, window_id: u32, open_files: Vec<String>) -> BootInfo {
+fn boot_info(
+    app: &AppHandle,
+    user_data: &Path,
+    window_id: u32,
+    window_type: &'static str,
+    category: Option<String>,
+    open_files: Vec<String>,
+) -> BootInfo {
     let cwd = std::env::current_dir().unwrap_or_default();
     let version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -155,6 +166,8 @@ fn boot_info(app: &AppHandle, user_data: &Path, window_id: u32, open_files: Vec<
         is_updatable: false,
         markdown_inclusions: MARKDOWN_EXTENSIONS.iter().map(|ext| format!("*.{ext}")).collect(),
         window_id,
+        window_type,
+        category,
         open_files,
     }
 }
@@ -302,33 +315,31 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
-// One editor window with its own boot info (packages/desktop/src/main/windows/editor.ts).
-pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
+// The parts every window shares: its boot info, available before any page
+// script runs, and no system title bar, since the renderer draws its own
+// (titleBarStyle "custom"). The native drag and drop handler would swallow
+// HTML drop events that the editor relies on.
+fn window_builder<'a>(
+    app: &'a AppHandle,
+    label: String,
+    window_id: u32,
+    window_type: &'static str,
+    category: Option<String>,
+    open_files: Vec<String>,
+) -> tauri::Result<tauri::WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let user_data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&user_data)?;
-    let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
-    let script = format!(
-        "window.__MT_BOOT__ = {};",
-        serde_json::to_string(&boot_info(app, &user_data, window_id, open_files))?
-    );
-
-    // No system title bar: the renderer draws its own (titleBarStyle "custom").
-    // The native drag and drop handler would swallow HTML drop events
-    // that the editor relies on.
-    let registry = app.state::<windows::Windows>();
-    registry.add(window_id);
-    let window = tauri::WebviewWindowBuilder::new(app, windows::label(window_id), tauri::WebviewUrl::default())
+    let boot = boot_info(app, &user_data, window_id, window_type, category, open_files);
+    let script = format!("window.__MT_BOOT__ = {};", serde_json::to_string(&boot)?);
+    Ok(tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
         .title("MarkText")
-        .inner_size(1200.0, 800.0)
-        .min_inner_size(400.0, 300.0)
         .decorations(false)
         .disable_drag_drop_handler()
-        .initialization_script(script)
-        .build()
-        .inspect_err(|_| registry.remove(window_id))?;
+        .initialization_script(script))
+}
 
-    // Debug builds print the page console, including script load
-    // errors, to the terminal.
+// Debug builds print the page console, including script load errors, to the terminal.
+fn print_console_messages(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     #[cfg(all(debug_assertions, target_os = "linux"))]
     window.with_webview(|webview| {
         use webkit2gtk::{SettingsExt, WebViewExt};
@@ -339,6 +350,47 @@ pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> ta
     #[cfg(not(all(debug_assertions, target_os = "linux")))]
     let _ = window;
     Ok(())
+}
+
+// One editor window (packages/desktop/src/main/windows/editor.ts).
+pub(crate) fn open_editor_window(app: &AppHandle, open_files: Vec<String>) -> tauri::Result<()> {
+    let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
+    let builder = window_builder(app, windows::label(window_id), window_id, "editor", None, open_files)?;
+    let registry = app.state::<windows::Windows>();
+    registry.add(window_id);
+    let window = builder
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(400.0, 300.0)
+        .build()
+        .inspect_err(|_| registry.remove(window_id))?;
+    print_console_messages(&window)
+}
+
+const SETTINGS_LABEL: &str = "settings";
+
+// packages/desktop/src/main/app/index.ts _openSettingsWindow: there is one
+// settings window; opening it again brings it forward on the given page.
+// Sizes follow packages/desktop/src/main/config.ts preferencesWinOptions.
+#[tauri::command]
+async fn open_settings_window(app: AppHandle, category: Option<String>) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
+        let page = category.map_or(serde_json::Value::Null, serde_json::Value::String);
+        windows::send_to_renderer(&window, "settings::change-tab", vec![page]);
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let open = || -> tauri::Result<()> {
+        let window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
+        let window = window_builder(&app, SETTINGS_LABEL.into(), window_id, "settings", category, Vec::new())?
+            .inner_size(950.0, 650.0)
+            .min_inner_size(450.0, 350.0)
+            .minimizable(false)
+            .center()
+            .build()?;
+        print_console_messages(&window)
+    };
+    open().map_err(|err| err.to_string())
 }
 
 // Electron's webContents.cut/copy/paste for the Edit menu: the page gets the
@@ -414,6 +466,7 @@ fn main() {
             path_exists,
             toggle_devtools,
             new_editor_window,
+            open_settings_window,
             editing_command,
             quit_app,
             preferences::get_preferences,
