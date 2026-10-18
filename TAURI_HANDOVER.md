@@ -817,6 +817,23 @@ saved. Checked in the Windows VM (a local MinGW build of `76f02ed0`): a launch
 with a new name on Z: opens the empty document, and Ctrl+S creates the file
 (with CRLF line endings, Windows' default, as in Electron).
 
+Link titles and PlantUML export (2026-10-18): `src-tauri/src/fetch.rs` makes
+the two requests Electron makes with `net.fetch` for the page, with the
+`ureq` crate (rustls with ring, the system's certificate store, a proxy from
+the environment and, on Windows, from the system settings; Chromium would
+use the system's proxy settings on Linux too). `mt::link::fetch-html` fetches
+a pasted address's page so Muya can use its title (`main/ipc/linkHtml.ts`:
+http and https only, 1.5 s, 1 MB, HTML only, otherwise "").
+`mt::diagram::fetch-plantuml` fetches a rendered diagram for the diagram
+viewer's Copy, Save SVG and Save PNG (`main/ipc/diagram.ts`, `plantumlUrl.ts`,
+`plantumlFetch.ts`): only from the server in the preferences, no redirects,
+15 s, 20 MB, images only. The diagram on screen is an image the page loads
+from the server itself. The viewer's save dialog, `mt::dialog::show-save`,
+was not answered at all before. Checked on Xvfb: pasting `https://example.com/`
+gives `[Example Domain](https://example.com/)`; a PlantUML diagram's Copy puts
+the server's PNG on the clipboard, and Save SVG writes the server's SVG and
+shows the success notice.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -904,7 +921,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |
-| Link titles on URL paste, PlantUML | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml` |
 
 Paths in this table are relative to `packages/desktop/`.
 

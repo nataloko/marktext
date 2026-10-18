@@ -14,6 +14,7 @@ mod clipboard;
 mod cmd;
 mod drop;
 mod encoding;
+mod fetch;
 mod fileops;
 mod folders;
 mod fonts;
@@ -605,7 +606,9 @@ fn main() {
             print::print_to_pdf,
             print::print_page,
             fonts::fonts_list,
-            cmd::cmd_exists
+            cmd::cmd_exists,
+            fetch::fetch_link_html,
+            fetch::fetch_plantuml
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())

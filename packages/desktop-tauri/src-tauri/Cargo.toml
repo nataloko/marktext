@@ -26,6 +26,7 @@ trash = "5"
 sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 fontdb = "0.24"
+ureq = { version = "3.4", default-features = false, features = ["rustls", "gzip", "platform-verifier", "win-system-proxy"] }
 
 [profile.release]
 codegen-units = 1

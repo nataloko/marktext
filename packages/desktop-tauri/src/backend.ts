@@ -5,8 +5,9 @@
 // Anything not handled is logged once by ./electron.
 
 import { invoke } from '@tauri-apps/api/core'
-import { ask, open as openDialog } from '@tauri-apps/plugin-dialog'
+import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
+import type { SaveDialogRequest } from '@shared/types/ipc'
 import type { MenuPopupPosition, MenuTemplate } from '@shared/types/menu'
 import { registerMenuHandlers } from './appMenu'
 import { appWindow, boot, isSettings, isWindows } from './boot'
@@ -334,6 +335,16 @@ const registerHandlers = (): void => {
   registerMenuHandlers()
 
   onSend('mt::shell::show-item', (fullPath: string) => revealItemInDir(fullPath))
+  // ipc/dialog.ts: the diagram viewer's Save SVG and Save PNG. Null when cancelled.
+  onInvoke('mt::dialog::show-save', async(request?: SaveDialogRequest) => {
+    try {
+      const { title, defaultPath, filters } = request ?? {}
+      return await saveDialog({ title, defaultPath, filters })
+    } catch (err) {
+      console.error('[dialog] the save dialog failed:', err)
+      return null
+    }
+  })
   onInvoke('mt::shell::open-external', (url: string) => openUrl(url))
   onInvoke('mt::shell::open-path', (fullPath: string) => openPath(fullPath))
   onSend('mt::clipboard::write-text', (text: string) => invoke('clipboard_write_text', { text }))
@@ -343,6 +354,20 @@ const registerHandlers = (): void => {
     invoke<boolean>('clipboard_write_image', { png: Array.from(png) })
   )
   onInvoke('mt::clipboard::guess-file-path', () => '')
+  onInvoke('mt::link::fetch-html', (url: string) => invoke<string>('fetch_link_html', { url }))
+  // ipc/diagram.ts answers with the outcome rather than failing.
+  onInvoke('mt::diagram::fetch-plantuml', async(server: string, encoded: string, format: string) => {
+    try {
+      const { mime, data } = await invoke<{ mime: string; data: number[] }>('fetch_plantuml', {
+        server,
+        encoded,
+        format
+      })
+      return { ok: true, mime, data: new Uint8Array(data) }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
   registerUserData()
