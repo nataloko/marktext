@@ -366,13 +366,15 @@ fn watch_file(window: &WebviewWindow, watcher: &FileWatcher, path: &str, id: u32
 
 // Returns false when the window already has the file open, so the page
 // switches to its tab instead (editor.ts openTabsFromPaths). Open files are
-// watched for outside changes (src/watch.rs).
+// watched for outside changes (src/watch.rs), except a file that does not
+// exist yet, which is watched from its first save (window_watch_file).
 #[tauri::command]
 pub fn window_add_file(
     window: WebviewWindow,
     windows: State<'_, Windows>,
     watcher: State<'_, FileWatcher>,
     path: String,
+    watch: Option<bool>,
 ) -> bool {
     let Some(id) = editor_id(&window) else { return false };
     {
@@ -383,8 +385,19 @@ pub fn window_add_file(
         }
         editor.opened_files.push(path.clone());
     }
-    watch_file(&window, &watcher, &path, id);
+    if watch != Some(false) {
+        watch_file(&window, &watcher, &path, id);
+    }
     true
+}
+
+#[tauri::command]
+pub fn window_watch_file(window: WebviewWindow, windows: State<'_, Windows>, watcher: State<'_, FileWatcher>, path: String) {
+    let Some(id) = editor_id(&window) else { return };
+    let open = windows.lock().editors.get(&id).is_some_and(|editor| editor.opened_files.contains(&path));
+    if open {
+        watch_file(&window, &watcher, &path, id);
+    }
 }
 
 fn replace_file(window: &WebviewWindow, windows: &Windows, watcher: &FileWatcher, id: u32, old_path: &str, path: &str) {

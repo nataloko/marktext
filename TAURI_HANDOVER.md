@@ -799,6 +799,22 @@ installed" with an empty `picgo` file on PATH. Checked in the Windows VM (a
 local MinGW build of `b563ccbe`): the font box lists the Windows fonts (Agency
 FB, Algerian, Arial and so on) after the bundled Open Sans.
 
+Missing files named on the command line (2026-10-18): as in Electron
+(`main/filesystem/markdown.ts loadCliMarkdownFile`), a markdown file that does
+not exist yet but whose folder does opens as an empty document under its name
+(`src/markdown.ts pendingMarkdownFile`). It stays out of the recent files and
+is not watched until its first save (`window_add_file` with `watch: false`,
+then `window_watch_file`); if the file has appeared by then, saving asks
+before replacing it. Only files from the command line (the first window's and
+a second launch's) may be missing; the open dialog and the rest still report
+a missing file. A session keeps such a tab, and restoring it registers it
+unwatched again. Checked on Xvfb: a launch with a new name, typing and Ctrl+S
+creating the file with no dialog and adding it to the recent files, an outside
+change to it showing afterwards; a second launch with a new name opening a
+tab, an outside program creating that file meanwhile, Cancel leaving it and
+Replace overwriting it; a pending tab kept through Quit and restored, then
+saved.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -883,7 +899,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
-| Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |

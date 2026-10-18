@@ -145,7 +145,8 @@ const reloadTab = async(tab: RestoredTab & { pathname: string }): Promise<void> 
     }
   } catch (err) {
     if (tab.isPendingCreation && !(await invoke<boolean>('path_exists', { path: tab.pathname }))) {
-      await invoke('window_add_file', { path: tab.pathname })
+      // Watched from its first save, as when it was first opened.
+      await invoke('window_add_file', { path: tab.pathname, watch: false })
       return
     }
     tab.isSaved = false

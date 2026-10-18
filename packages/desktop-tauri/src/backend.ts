@@ -411,7 +411,7 @@ const listenForRendererMessages = (): Promise<unknown> =>
 
 const listenForFiles = (): Promise<unknown> =>
   appWindow.listen<string[]>('mt::tauri::open-files', ({ payload }) => {
-    opening = opening.then(() => openTabs(payload))
+    opening = opening.then(() => openTabs(payload, true))
   })
 
 const bootstrap = (addBlankTab: boolean): void => {
@@ -446,7 +446,8 @@ const bootEditor = async(): Promise<void> => {
   }
   if (!files.length) return
   await whenListening('mt::open-new-tab')
-  await openTabs(files)
+  // All from the command line (src-tauri/src/main.rs cli_paths).
+  await openTabs(files, true)
 }
 
 // Must finish before the preload runs, because the preload reads boot info

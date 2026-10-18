@@ -582,6 +582,7 @@ fn main() {
             fileops::paths_is_image,
             fileops::fs_copy_with_content_hash,
             windows::window_add_file,
+            windows::window_watch_file,
             windows::window_change_file,
             windows::window_remove_file,
             windows::window_open_folder,

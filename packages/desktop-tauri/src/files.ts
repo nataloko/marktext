@@ -2,11 +2,13 @@
 // files (src-tauri/src/windows.rs) and the recent files (src-tauri/src/recent.rs).
 
 import { invoke } from '@tauri-apps/api/core'
-import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { t } from '@/i18n'
 import { appWindow, boot, path } from './boot'
 import { emitToRenderer } from './electron'
 import {
   loadMarkdownFile,
+  pendingMarkdownFile,
   writeMarkdownFile,
   type LoadPreferences,
   type MarkdownOptions
@@ -39,16 +41,35 @@ const loadPreferences = (): LoadPreferences => ({
 export const readDocument = (pathname: string): ReturnType<typeof loadMarkdownFile> =>
   loadMarkdownFile(pathname, loadPreferences())
 
+// The document for a file that does not exist yet; its folder has to.
+const pendingDocument = async(pathname: string): Promise<ReturnType<typeof pendingMarkdownFile>> => {
+  const folder = path.dirname(pathname)
+  if (!(await invoke<boolean>('path_exists', { path: folder }))) {
+    throw new Error(`${folder}: no such folder`)
+  }
+  return pendingMarkdownFile(pathname, loadPreferences(), String(preferences.defaultEncoding ?? 'utf8'))
+}
+
 // packages/desktop/src/main/windows/editor.ts openTabsFromPaths and _doOpenTab.
-export const openTab = async(requested: string, selected = true): Promise<void> => {
+// With `allowMissing`, for files named on the command line, a file that does
+// not exist yet opens as an empty document under its name; it is left out of
+// the recent files and not watched until it is saved.
+export const openTab = async(
+  requested: string,
+  selected = true,
+  allowMissing = false
+): Promise<void> => {
   const pathname = await invoke<string>('resolve_path', { path: requested })
-  if (!(await invoke<boolean>('window_add_file', { path: pathname }))) {
+  const missing = allowMissing && !(await invoke<boolean>('path_exists', { path: pathname }))
+  if (!(await invoke<boolean>('window_add_file', { path: pathname, watch: !missing }))) {
     emitToRenderer('mt::switch-tab-by-file_path', pathname, {})
     return
   }
   try {
-    const document = await loadMarkdownFile(pathname, loadPreferences())
-    void addRecentFile(pathname)
+    const document = missing
+      ? await pendingDocument(pathname)
+      : await loadMarkdownFile(pathname, loadPreferences())
+    if (!missing) void addRecentFile(pathname)
     emitToRenderer('mt::open-new-tab', document, {}, selected)
   } catch (err) {
     void invoke('window_remove_file', { path: pathname })
@@ -60,9 +81,9 @@ export const openTab = async(requested: string, selected = true): Promise<void> 
   }
 }
 
-export const openTabs = async(paths: string[]): Promise<void> => {
+export const openTabs = async(paths: string[], allowMissing = false): Promise<void> => {
   for (const [index, pathname] of paths.entries()) {
-    await openTab(pathname, index === 0)
+    await openTab(pathname, index === 0, allowMissing)
   }
 }
 
@@ -80,7 +101,7 @@ export type SaveRequest = [
   filename: string,
   pathname: string,
   markdown: string,
-  options: MarkdownOptions,
+  options: MarkdownOptions & { isPendingCreation?: boolean },
   defaultPath?: string
 ]
 
@@ -89,7 +110,21 @@ export const saveTab = async(
   forceDialog: boolean,
   ...[id, filename, pathname, markdown, options, defaultPath]: SaveRequest
 ): Promise<void> => {
-  const existedOnDisk = !!pathname && (await invoke<boolean>('path_exists', { path: pathname }))
+  // A document opened from the command line before its file existed.
+  const pending = !!pathname && !!options.isPendingCreation
+  // file.ts handleResponseForSave: if that file has appeared since, it is
+  // replaced only when the user agrees. Save As leaves it to the save dialog.
+  if (pending && !forceDialog && (await invoke<boolean>('path_exists', { path: pathname }))) {
+    const replace = await ask(t('dialog.fileExists', { filename: pathname }), {
+      title: 'MarkText',
+      kind: 'warning',
+      okLabel: t('dialog.replace'),
+      cancelLabel: t('dialog.cancel')
+    })
+    if (!replace) return
+  }
+  const existedOnDisk =
+    !pending && !!pathname && (await invoke<boolean>('path_exists', { path: pathname }))
   let target = pathname
 
   if (forceDialog || !pathname) {
@@ -111,6 +146,8 @@ export const saveTab = async(
       // and menu-add-recently-used.
       if (pathname && pathname !== target) {
         void invoke('window_change_file', { oldPath: pathname, path: target })
+      } else if (pending) {
+        void invoke('window_watch_file', { path: target })
       } else {
         void invoke('window_add_file', { path: target })
       }

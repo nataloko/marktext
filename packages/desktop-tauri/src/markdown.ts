@@ -80,6 +80,24 @@ export const loadMarkdownFile = async(pathname: string, prefs: LoadPreferences) 
   }
 }
 
+// filesystem/markdown.ts loadCliMarkdownFile: the empty document for a file
+// named on the command line that does not exist yet.
+export const pendingMarkdownFile = (
+  pathname: string,
+  prefs: LoadPreferences,
+  defaultEncoding: string
+) => ({
+  markdown: '',
+  filename: basename(pathname),
+  pathname,
+  isPendingCreation: true,
+  encoding: { encoding: defaultEncoding, isBom: false },
+  lineEnding: prefs.preferredEol,
+  adjustLineEndingOnSave: prefs.preferredEol !== 'lf',
+  trimTrailingNewline: prefs.trimTrailingNewline,
+  isMixedLineEndings: false
+})
+
 export const writeMarkdownFile = async(
   pathname: string,
   content: string,
