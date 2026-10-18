@@ -101,6 +101,15 @@
 
 <br />
 
+## Tauri trial build
+
+This branch (`tauri-trial`) runs MarkText on [Tauri](https://tauri.app) instead of Electron, on Windows and Linux. It is a trial: most of the editor works as in the Electron version, but some features are missing or not fully tested. Developer notes are in [TAURI_HANDOVER.md](TAURI_HANDOVER.md).
+
+- **Image uploads (PicGo or your own script):** not fully tested. Tried only on Linux with stand-in programs, and not on Windows.
+- **Spell checking:** not available yet.
+- **Pandoc import and export:** not available yet.
+- **Automatic updates:** not available.
+
 <h2 align="center">Sponsors</h2>
 
 MarkText is an open-source Markdown editor powered by the support of its community. If MarkText improves your workflow, please consider [sponsoring the project](https://github.com/sponsors/marktext). Thank you to all the sponsors ❤️
