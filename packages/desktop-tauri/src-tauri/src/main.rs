@@ -169,9 +169,10 @@ struct LoadedText {
 
 // packages/desktop/src/main/filesystem/markdown.ts loadMarkdownFile: read,
 // detect the encoding, decode. The page handles line endings and the trailing
-// newline (src/markdown.ts).
+// newline (src/markdown.ts). Async, like the write below, so that a slow
+// drive holds up only this document instead of every window's main thread.
 #[tauri::command]
-fn read_markdown_file(
+async fn read_markdown_file(
     window: tauri::WebviewWindow,
     watcher: tauri::State<'_, watch::FileWatcher>,
     path: String,
@@ -188,7 +189,7 @@ fn read_markdown_file(
 
 // markdown.ts writeMarkdownFile after the line endings are applied.
 #[tauri::command]
-fn write_markdown_file(
+async fn write_markdown_file(
     window: tauri::WebviewWindow,
     watcher: tauri::State<'_, watch::FileWatcher>,
     path: String,

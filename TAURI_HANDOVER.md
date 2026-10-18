@@ -375,11 +375,11 @@ Review of steps 5 and 6 (reviewer agent, 2026-10-17) and what came of it:
   target's mode and retried on Windows sharing violations (`aa38507c`); links
   open as their target so their folder is watched; watch keys ignore case on
   Windows; a folder the OS refused is retried by the next file.
-- Open: the owner of a saved file is not kept (write-file-atomic chowns);
-  saves are synchronous commands, so a slow network drive freezes every window
-  (make the file commands async, which the unique temp names already allow);
-  on Windows the Edit menu's `document.execCommand` paste is probably blocked
+- Open: the owner of a saved file is not kept (write-file-atomic chowns); on
+  Windows the Edit menu's `document.execCommand` paste is probably blocked
   by WebView2; the window registry compares paths case sensitively on Windows.
+- Done since: the file read and write commands are async (2026-10-18), so a
+  slow drive no longer freezes every window's main thread.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
