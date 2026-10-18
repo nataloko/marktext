@@ -813,7 +813,9 @@ creating the file with no dialog and adding it to the recent files, an outside
 change to it showing afterwards; a second launch with a new name opening a
 tab, an outside program creating that file meanwhile, Cancel leaving it and
 Replace overwriting it; a pending tab kept through Quit and restored, then
-saved.
+saved. Checked in the Windows VM (a local MinGW build of `76f02ed0`): a launch
+with a new name on Z: opens the empty document, and Ctrl+S creates the file
+(with CRLF line endings, Windows' default, as in Electron).
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
