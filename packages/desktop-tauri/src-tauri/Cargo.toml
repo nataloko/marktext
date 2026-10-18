@@ -18,6 +18,7 @@ chardetng = "1"
 encoding_rs = "0.8"
 notify = "8"
 globset = "0.4"
+trash = "5"
 
 [profile.release]
 codegen-units = 1

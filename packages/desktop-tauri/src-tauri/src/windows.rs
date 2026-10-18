@@ -38,6 +38,8 @@ struct Registry {
 
 #[derive(Default)]
 struct Editor {
+    // A path appears twice while two tabs have it, which happens for a moment
+    // when a document is renamed over another open one.
     opened_files: Vec<String>,
     // The folder in the sidebar, or the one it is about to show.
     root: Option<String>,
@@ -334,7 +336,23 @@ pub fn window_add_file(
     true
 }
 
-// After Save As or a rename (editor.ts changeOpenedFilePath).
+fn replace_file(window: &WebviewWindow, windows: &Windows, watcher: &FileWatcher, id: u32, old_path: &str, path: &str) {
+    let still_open = {
+        let mut registry = windows.lock();
+        let Some(editor) = registry.editors.get_mut(&id) else { return };
+        match editor.opened_files.iter().position(|open| open == old_path) {
+            Some(index) => editor.opened_files[index] = path.to_string(),
+            None => editor.opened_files.push(path.to_string()),
+        }
+        editor.opened_files.iter().any(|open| open == old_path)
+    };
+    if !still_open {
+        watcher.unwatch(old_path, id);
+    }
+    watch_file(window, watcher, path, id);
+}
+
+// After Save As (editor.ts changeOpenedFilePath).
 #[tauri::command]
 pub fn window_change_file(
     window: WebviewWindow,
@@ -343,15 +361,23 @@ pub fn window_change_file(
     old_path: String,
     path: String,
 ) {
-    let Some(id) = editor_id(&window) else { return };
-    {
-        let mut registry = windows.lock();
-        let Some(editor) = registry.editors.get_mut(&id) else { return };
-        editor.opened_files.retain(|open| *open != old_path && *open != path);
-        editor.opened_files.push(path.clone());
+    if let Some(id) = editor_id(&window) {
+        replace_file(&window, &windows, &watcher, id, &old_path, &path);
     }
-    watcher.unwatch(&old_path, id);
-    watch_file(&window, &watcher, &path, id);
+}
+
+// A document renamed on disk (src/fileops.rs move_file). The content the
+// window knew is the same under the new name, so the move is no outside
+// change; the watcher's record is taken first because on Windows a change of
+// case alone gives both names one record, which unwatching drops.
+pub fn file_moved(window: &WebviewWindow, windows: &Windows, watcher: &FileWatcher, from: &str, to: &str) {
+    let Some(id) = editor_id(window) else { return };
+    let open = windows.lock().editors.get(&id).is_some_and(|editor| editor.opened_files.iter().any(|open| open == from));
+    if open {
+        let known = watcher.known(from, id);
+        replace_file(window, windows, watcher, id, from, to);
+        watcher.restore(to, id, known);
+    }
 }
 
 #[tauri::command]
@@ -362,10 +388,17 @@ pub fn window_remove_file(
     path: String,
 ) {
     let Some(id) = editor_id(&window) else { return };
-    if let Some(editor) = windows.lock().editors.get_mut(&id) {
-        editor.opened_files.retain(|open| *open != path);
+    let still_open = {
+        let mut registry = windows.lock();
+        let Some(editor) = registry.editors.get_mut(&id) else { return };
+        if let Some(index) = editor.opened_files.iter().position(|open| *open == path) {
+            editor.opened_files.remove(index);
+        }
+        editor.opened_files.contains(&path)
+    };
+    if !still_open {
+        watcher.unwatch(&path, id);
     }
-    watcher.unwatch(&path, id);
 }
 
 // editor.ts openFolder: the window's sidebar shows the folder from now on,

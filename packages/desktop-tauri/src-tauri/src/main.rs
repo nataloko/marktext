@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 mod encoding;
+mod fileops;
 mod folders;
 mod preferences;
 mod recent;
@@ -493,6 +494,17 @@ fn main() {
             resolve_path,
             path_exists,
             is_directory,
+            fileops::fs_is_file,
+            fileops::fs_is_directory,
+            fileops::fs_is_executable,
+            fileops::fs_ensure_dir,
+            fileops::fs_write_file,
+            fileops::fs_output_file,
+            fileops::fs_read_file,
+            fileops::fs_readdir,
+            fileops::fs_copy,
+            fileops::move_file,
+            fileops::trash_item,
             toggle_devtools,
             new_editor_window,
             open_settings_window,

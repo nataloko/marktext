@@ -234,6 +234,17 @@ impl FileWatcher {
         self.lock().remember(Path::new(path), window, Some(hash(bytes)));
     }
 
+    // What a window last read or wrote at `path`, for `restore` after a rename.
+    pub fn known(&self, path: &str, window: u32) -> Option<Option<u64>> {
+        self.lock().known.get(&key(Path::new(path))).and_then(|known| known.get(&window)).copied()
+    }
+
+    pub fn restore(&self, path: &str, window: u32, known: Option<Option<u64>>) {
+        if let Some(known) = known {
+            self.lock().remember(Path::new(path), window, known);
+        }
+    }
+
     // Returns a message for the user when the OS refuses another watch.
     pub fn watch(&self, path: &str, window: u32) -> Option<String> {
         let mut state = self.lock();

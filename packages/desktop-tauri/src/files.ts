@@ -36,6 +36,9 @@ const loadPreferences = (): LoadPreferences => ({
   autoNormalizeLineEndings: !!preferences.autoNormalizeLineEndings
 })
 
+export const readDocument = (pathname: string): ReturnType<typeof loadMarkdownFile> =>
+  loadMarkdownFile(pathname, loadPreferences())
+
 // packages/desktop/src/main/windows/editor.ts openTabsFromPaths and _doOpenTab.
 export const openTab = async(requested: string, selected = true): Promise<void> => {
   const pathname = await invoke<string>('resolve_path', { path: requested })

@@ -19,6 +19,7 @@ import {
   showOpenDialog,
   type SaveRequest
 } from './files'
+import { registerFileOperations } from './fileOps'
 import { listenForFolder, openFolder, showOpenFolderDialog } from './folders'
 import { popupMenu } from './menu'
 import {
@@ -298,6 +299,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::clipboard::read-text', () => navigator.clipboard.readText())
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
+  registerFileOperations()
 
   onInvoke('mt::i18n::load', async(language: string) => {
     const load = translations[`../../desktop/static/locales/${language}.json`]

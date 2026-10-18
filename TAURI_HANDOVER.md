@@ -455,6 +455,36 @@ inotify watch; notify on Windows drops overflowing events without a word (a
 busy round now lists everything again); an older folder could win a race with
 a newer one; a page reload lost the sidebar.
 
+Sidebar file operations, part 2 of the sidebar (2026-10-18), checked on
+Xvfb: `src-tauri/src/fileops.rs` does the renderer's `window.fileUtils` calls
+(is-file, is-directory, is-executable, ensure-dir, write-file, output-file,
+read-file, readdir, copy, move), moves to the trash (`trash` crate) and the
+menu's Rename and Move To; `src/fileOps.ts` asks Electron's questions first
+(Move to Trash, Replace). Checked: New File (the new file opens as a tab,
+saves, and is watched), New Directory, Copy and Paste in the same folder
+("alpha (copy).md"), Cut and Paste into another folder, Rename in the sidebar
+and from the ☰ menu (the open tab follows, its watch moves with it, so an
+outside change to the renamed file still reloads it; a taken name asks or is
+refused with a notice), Move to Trash (Cancel keeps the file; on another disk
+the item goes to that disk's `.Trash-<uid>`, as the freedesktop rules say).
+Not checked: Move To (its save dialog takes no typing on Xvfb). Not ported:
+copy-with-content-hash for pasted images; stat, unlink and empty-dir, which
+the renderer never calls. Deliberate differences from Electron: a file the
+user agrees to replace (Rename, Move To) goes to the trash instead of being
+overwritten, because the dialog cannot make Cancel its default button as
+Electron's does; Paste refuses a name that is taken (fs-extra's copy would
+overwrite it silently). Cut and Paste of an open document leaves its tab on
+the old path, as in Electron. A reviewer pass found, and the commit fixes: a
+link moved onto its target replaced the target's content with a link to
+itself (the "same file" test followed links; it now compares the entries
+themselves and only allows a change of case); pasting an open file moved the
+window's records although the tab stays, so the file could not be opened
+again; renaming onto another open file dropped the watch when the renderer
+closed the other tab (a path may now appear twice in a window's records); a
+change of case alone on Windows lost the watcher's record of the content;
+the trash runs on a blocking thread, where a panic in the trash crate's COM
+setup comes back as an error.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -538,12 +568,11 @@ port. Unhandled channels are logged in debug builds (section 3).
 |---|---|
 | ☰ menu: pandoc, updates (see section 5) | `src/main/menu/actions/` |
 | Editor right click menu (tab and sidebar menus work through `mt::menu::popup`) | `src/main/contextMenu/`, Electron `context-menu` event in `src/main/windows/editor.ts` |
-| Sidebar file operations: new file or folder, rename, move, copy, paste, delete to trash; the menu's Rename and Move To. A file created in the sidebar must arrive with its content (`data` in the add change), which the renderer opens as the new tab | `mt::fs::*`, `mt::fs-trash-item`, `mt::rename`, `mt::response-file-move-to`, `renderer/src/store/project.ts` |
 | Folder drag and drop onto the window | `mt::window::drop`, `webUtils.getPathForFile`; Tauri drag drop event |
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
-| Images: paste, drop, insert from file | `mt::fs::*`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
+| Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
 | Find in folder and quick open | `mt::rg::*`, `mt::open-file-by-window-id` (ripgrep's crates can run in process) |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
