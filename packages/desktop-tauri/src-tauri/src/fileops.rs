@@ -32,10 +32,14 @@ pub fn fs_is_directory(path: String) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
 }
 
-// common/filesystem isExecutableFile. Node's X_OK check on Windows only asks
-// whether the file exists.
 #[tauri::command]
 pub fn fs_is_executable(path: String) -> bool {
+    is_executable(Path::new(&path))
+}
+
+// common/filesystem isExecutableFile. Node's X_OK check on Windows only asks
+// whether the file exists.
+pub fn is_executable(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else { return false };
     #[cfg(unix)]
     {

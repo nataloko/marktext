@@ -784,6 +784,19 @@ title, the page address) unless they are turned off under More settings, and
 the PDF footer overlapped the last line of text on page 2 (the renderer's
 footer layout in Chromium, so probably the same in Electron; not compared).
 
+Fonts list and command lookup (2026-10-18): `src-tauri/src/fonts.rs` answers
+`mt::fonts::list` for the Settings pages' font boxes with the families the
+`fontdb` crate finds in the folders the webviews take their fonts from
+(fontconfig's on Linux, the system and the user's Fonts folders on Windows),
+in place of Electron's font-list. `src-tauri/src/cmd.rs` answers
+`mt::cmd::exists` (the Image page's PicGo check) by looking on PATH and in the
+folders package managers install to, as `main/utils/resolveCommand.ts` does;
+nothing is run. Electron also asks the login shell for its PATH, which is left
+for the uploader since that runs the program found. Checked on Xvfb: the
+Editor page's font box lists the installed families and a choice applies to
+the open editor; the Image page shows "PicGo is not installed", and "PicGo is
+installed" with an empty `picgo` file on PATH.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -869,10 +882,10 @@ port. Unhandled channels are logged in debug builds (section 3).
 | File watching: polling for network drives, `watcherUsePolling` | `src/main/filesystem/watcher.ts` (notify's PollWatcher) |
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
-| Settings pages: fonts list, pandoc and command detection (`mt::cmd::exists`, needed for PicGo too) | `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
+| Settings, General: where pandoc is (`mt::pandoc::command`); the page shows it as not found | `src/main/ipc/cmd.ts`, `src/main/utils/pandoc.ts` |
 | Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
 | Auto update | `electron-updater`; Tauri updater plugin |
-| Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
+| Link titles on URL paste, PlantUML | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml` |
 
 Paths in this table are relative to `packages/desktop/`.
 

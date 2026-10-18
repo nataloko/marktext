@@ -361,6 +361,8 @@ const registerHandlers = (): void => {
     const directory = await openDialog({ directory: true })
     if (typeof directory === 'string') await setPreferences({ defaultDirectoryToOpen: directory })
   })
+  onInvoke('mt::fonts::list', () => invoke<string[]>('fonts_list'))
+  onInvoke('mt::cmd::exists', (name: string) => invoke<boolean>('cmd_exists', { name }))
   // No keymap makes the Keybindings page fall back to the US layout.
   onInvoke('mt::keybinding-get-keyboard-info', () => ({ layout: null, keymap: null }))
   onInvoke('mt::keybinding-get-pref-keybindings', () => ({

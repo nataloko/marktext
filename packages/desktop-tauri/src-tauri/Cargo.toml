@@ -25,6 +25,7 @@ grep-searcher = "0.1"
 trash = "5"
 sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+fontdb = "0.24"
 
 [profile.release]
 codegen-units = 1

@@ -11,10 +11,12 @@ use tauri::{AppHandle, Manager};
 
 mod buffers;
 mod clipboard;
+mod cmd;
 mod drop;
 mod encoding;
 mod fileops;
 mod folders;
+mod fonts;
 mod keybindings;
 mod preferences;
 mod print;
@@ -600,7 +602,9 @@ fn main() {
             clipboard::clipboard_write_image,
             fileops::image_path_entries,
             print::print_to_pdf,
-            print::print_page
+            print::print_page,
+            fonts::fonts_list,
+            cmd::cmd_exists
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())
