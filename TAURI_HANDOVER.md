@@ -1043,8 +1043,11 @@ then the ☰ menu, file watching and encodings.
    - whether the save dialog blocks typing in the editor while it is open
    - Wayland as well as X11
    First desktop run (2026-10-19, debug build in the distrobox, GNOME on
-   Wayland): the user found it responsive, and resizing the window works.
-   The rest of the list is still to try.
+   Wayland): the user found it responsive, resizing the window works, and
+   pasting rich text from a browser works. The save dialog does not block the
+   editor: typing still reaches it while the dialog is open, where Electron's
+   dialogs are modal to their window, so a document can change between asking
+   where to save and saving. The rest of the list is still to try.
 2. **Code block Enter bug** on WebKit: reproduce in the Tauri app, then in Muya.
 3. **Windows build**: GitHub Actions workflow added on 2026-10-18 (section 4).
    Then test the installer by hand on Windows.
