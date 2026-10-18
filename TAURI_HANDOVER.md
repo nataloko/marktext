@@ -405,6 +405,22 @@ Review of steps 5 and 6 (reviewer agent, 2026-10-17) and what came of it:
 - Done since: the file read and write commands are async (2026-10-18), so a
   slow drive no longer freezes every window's main thread.
 
+Preferences window (commit `70497cd5`), checked on Xvfb: Rust
+`open_settings_window` keeps one settings window (950x650, no minimise,
+centred, as Electron's preferencesWinOptions); opening it again brings it
+forward and sends `settings::change-tab`. Its boot info says
+`windowType: "settings"`, so the page sets `type=settings` in the URL (the
+renderer routes to /preference), skips documents, menu and editor shortcuts,
+and closes at once, without the unsaved documents prompt. Opened from the ☰
+menu, Ctrl+, and the renderer's `mt::open-setting-window`. Preferences go
+through the Rust store, so a theme picked in settings restyles every window
+and persists; quitting closes settings too. Working: General (including the
+default folder picker), Editor, Markdown, Theme; Keybindings lists the
+defaults. Not yet: saving custom shortcuts (shows a notice), the Image page's
+user data (image folder, uploaders: `mt::set-user-data`, dataCenter), the
+fonts list, pandoc and command detection (read as missing), spellchecker
+dictionaries (empty lists).
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -496,8 +512,8 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Find in folder | `mt::rg::*` (ripgrep; can ship as a Tauri sidecar binary) |
 | Folders on the command line or from a second launch; missing CLI files as named empty documents | `src/main/app/index.ts _openPathList`, `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
-| Preferences window | renderer route `/preference`, window type `settings`, `src/main/windows/setting.ts` |
-| User keybindings (`keybindings.json`) | `src/main/keyboard/shortcutHandler.ts` |
+| Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
+| User keybindings (`keybindings.json`): save from the Keybindings page, apply to shortcuts and menu | `src/main/keyboard/shortcutHandler.ts`, `src/main/app/index.ts` mt::keybinding-* |
 | Auto update | `electron-updater`; Tauri updater plugin |
 | Window size/position memory | `electron-window-state`; Tauri window state plugin |
 | Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
