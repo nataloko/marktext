@@ -640,6 +640,28 @@ Writing had the same refusal (Copy Path on a tab copied nothing) and now goes
 through Rust too (`clipboard_write_text`); checked on Xvfb. Copy Image in the
 image viewer (`mt::clipboard::write-image`) has no handler yet.
 
+Window size and position (2026-10-18): `src-tauri/src/window_state.rs`
+stands in for electron-window-state as `main/windows/editor.ts` uses it: one
+`window-state.json` in the app data folder with Electron's keys (x, y, width,
+height, isMaximized, isFullScreen, displayBounds), read for every new editor
+window and rewritten when one closes, so the window closed last decides; a
+saved window that no longer fits on a monitor opens at the default 1200 by 800,
+centred (Electron puts it at the top left corner), and with no saved state the
+window is centred as `ensureWindowPosition` does. Not using
+tauri-plugin-window-state, which keeps one state per window label. Checked on
+Xvfb: a resized and moved window comes back where it was, and an off screen
+position gives the centred default. Not checked: maximized, full screen,
+monitors with different scale factors.
+
+Known crash, Linux only (2026-10-18, predates that day's changes): with only a
+caret in the editor, Ctrl+C and then Ctrl+V crashes the app within seconds, in
+WebKitGTK's `WebKit::Clipboard::formats` callback. Muya cancels every copy event
+and, with nothing selected, sets no data (on purpose, marktext #3130, so the
+clipboard is left alone, as Chromium does); WebKitGTK seems to write the empty
+data, the window then owns a clipboard that offers no formats, and asking GTK
+for the formats of such a clipboard crashes WebKit (GTK reports the count as
+-1). Not fixed yet.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -730,7 +752,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
 | User keybindings (`keybindings.json`): save from the Keybindings page, apply to shortcuts and menu | `src/main/keyboard/shortcutHandler.ts`, `src/main/app/index.ts` mt::keybinding-* |
 | Auto update | `electron-updater`; Tauri updater plugin |
-| Window size/position memory | `electron-window-state`; Tauri window state plugin |
 | Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
 
 Paths in this table are relative to `packages/desktop/`.

@@ -19,6 +19,7 @@ mod preferences;
 mod recent;
 mod search;
 mod watch;
+mod window_state;
 mod windows;
 
 // packages/desktop/src/common/filesystem/paths.ts MARKDOWN_EXTENSIONS.
@@ -429,11 +430,17 @@ fn build_editor_window(app: &AppHandle, contents: Contents, buffer_id: String) -
     let builder = window_builder(app, label, window_id, "editor", None, contents)?;
     let registry = app.state::<windows::Windows>();
     registry.add(window_id, open_folder, buffer_id);
-    let window = builder
-        .inner_size(1200.0, 800.0)
+    let placement = app.state::<window_state::WindowStates>().begin(app, window_id);
+    let mut builder = builder
+        .inner_size(placement.width, placement.height)
         .min_inner_size(400.0, 300.0)
-        .build()
-        .inspect_err(|_| registry.remove(window_id))?;
+        .maximized(placement.maximized)
+        .fullscreen(placement.full_screen);
+    builder = match placement.position {
+        Some((x, y)) => builder.position(x, y),
+        None => builder.center(),
+    };
+    let window = builder.build().inspect_err(|_| registry.remove(window_id))?;
     drop::attach(&window);
     print_console_messages(&window)
 }
@@ -583,7 +590,14 @@ fn main() {
             let Some(id) = windows::id_from_label(window.label()) else { return };
             match event {
                 tauri::WindowEvent::Focused(true) => window.state::<windows::Windows>().focus(id),
+                tauri::WindowEvent::Moved(_)
+                | tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::ScaleFactorChanged { .. }
+                | tauri::WindowEvent::CloseRequested { .. } => {
+                    window.state::<window_state::WindowStates>().update(window, id)
+                }
                 tauri::WindowEvent::Destroyed => {
+                    window.state::<window_state::WindowStates>().save(id);
                     window.state::<windows::Windows>().remove(id);
                     window.state::<watch::FileWatcher>().unwatch_window(id);
                     window.state::<folders::Folders>().close(id);
@@ -602,6 +616,7 @@ fn main() {
             buffers::remove_temp_files(buffers.dir());
             let sessions = start_up(buffers.dir(), &preferences, &files, &mut folders);
             app.manage(preferences);
+            app.manage(window_state::WindowStates::new(user_data.join("window-state.json")));
             app.manage(buffers);
             app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));
             app.manage(watch::FileWatcher::start(app.handle()));
