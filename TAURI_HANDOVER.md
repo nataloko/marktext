@@ -650,7 +650,12 @@ centred (Electron puts it at the top left corner), and with no saved state the
 window is centred as `ensureWindowPosition` does. Not using
 tauri-plugin-window-state, which keeps one state per window label. Checked on
 Xvfb: a resized and moved window comes back where it was, and an off screen
-position gives the centred default. Not checked: maximized, full screen,
+position gives the centred default. In the Windows VM (CI installer
+`3b1a21c2`) the window came back where it was moved to, but about 16 pixels
+wider at every start: the outer size was saved, which on Windows counts the
+invisible resize border around a frameless window, and then given to the next
+window as its inner size. The inner size is saved now; three starts of a local
+MinGW build kept the same width. Not checked: maximized, full screen,
 monitors with different scale factors.
 
 Crash on paste, Linux only (2026-10-18, older than that day's changes):

@@ -205,7 +205,10 @@ impl WindowStates {
             return;
         };
         let scale = window.scale_factor().unwrap_or(1.0);
-        let bounds = match (window.outer_position(), window.outer_size()) {
+        // The inner size, as a new window is given one: on Windows the outer
+        // size also counts the invisible resize border, so the window would
+        // grow by it at every start.
+        let bounds = match (window.outer_position(), window.inner_size()) {
             (Ok(position), Ok(size)) => Some(logical_rect(position, size, scale)),
             _ => None,
         };
