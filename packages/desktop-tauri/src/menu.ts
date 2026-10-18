@@ -2,6 +2,7 @@
 // packages/desktop/src/main/ipc/window.ts mt::menu::popup (the renderer's own
 // context menus); src/appMenu.ts builds the ☰ menu with `showPopup`.
 
+import { invoke } from '@tauri-apps/api/core'
 import { LogicalPosition } from '@tauri-apps/api/dpi'
 import {
   Menu,
@@ -62,7 +63,9 @@ export const showPopup = async(items: ItemOptions[], position?: MenuPopupPositio
   // The previous popup is gone once a new one opens; release it.
   await shown?.close()
   shown = await Menu.new({ items })
+  // Returns once the menu has closed (the popup blocks on Windows and Linux).
   await shown.popup(position ? new LogicalPosition(position.x, position.y) : undefined)
+  await invoke('focus_webview')
 }
 
 export const popupMenu = (
