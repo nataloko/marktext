@@ -495,6 +495,27 @@ change of case alone on Windows lost the watcher's record of the content;
 the trash runs on a blocking thread, where a panic in the trash crate's COM
 setup comes back as an error.
 
+Find in folder and quick open, part 3 of the sidebar (2026-10-18), checked on
+Xvfb: `src-tauri/src/search.rs` stands in for `main/ipc/ripgrep.ts`. Instead
+of running the rg binary it uses the crates rg is built from (`ignore` for the
+walk, `grep-regex` and `grep-searcher` for matching) with the settings
+ripgrep.ts puts on rg's command line, and sends the same `mt::rg::*` events
+and payloads; `src/search.ts` handles `mt::rg::start`, `mt::rg::cancel` and
+`mt::open-file-by-window-id`. Checked: plain search (9 matches in 5 files,
+highlights placed right next to Japanese text and an emoji, which count as
+UTF-16 units as in Electron), case sensitive, whole word, regex, a regex
+across two lines, clicking a result opens the file, the Include hidden and
+Exclusions settings, quick open on Ctrl+P (the shortcut was missing from the
+page's command table) opening the chosen file in the same window. As with rg,
+a markdown file in the folder's top level is searched even when hidden or
+named in an ignore file, because the markdown inclusions win over both;
+hidden and ignored folders are still skipped. Differences from Electron: one
+thread searches the folders one after another (the renderer only ever passes
+one); an invalid regex or max file size ends the search with no results and a
+line on stderr, as Electron logs rg's refusal. Upstream renderer quirk: a
+match across lines shows a garbled preview, because `searchResultItem.vue`
+cuts the text with the start and end columns as if both were on one line.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -583,7 +604,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Spellcheck | `src/main/spellchecker/`, `src/main/contextMenu/editor/spellcheck.ts` |
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`, `webUtils.getPathForFile`; Tauri drag drop event |
-| Find in folder and quick open | `mt::rg::*`, `mt::open-file-by-window-id` (ripgrep's crates can run in process) |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Session restore | `update-buffer-state`, `src/main/editorBufferStore/` (then drop the `restoreAll` rewrite) |
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |

@@ -14,6 +14,7 @@ mod fileops;
 mod folders;
 mod preferences;
 mod recent;
+mod search;
 mod watch;
 mod windows;
 
@@ -519,10 +520,13 @@ fn main() {
             windows::window_ready,
             recent::recent_files,
             recent::add_recent_file,
-            recent::clear_recent_files
+            recent::clear_recent_files,
+            search::search_start,
+            search::search_cancel
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())
+        .manage(search::Searches::default())
         .on_window_event(|window, event| {
             let Some(id) = windows::id_from_label(window.label()) else { return };
             match event {
@@ -531,6 +535,7 @@ fn main() {
                     window.state::<windows::Windows>().remove(id);
                     window.state::<watch::FileWatcher>().unwatch_window(id);
                     window.state::<folders::Folders>().close(id);
+                    window.state::<search::Searches>().close(id);
                 }
                 _ => {}
             }

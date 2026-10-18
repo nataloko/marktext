@@ -30,6 +30,7 @@ import {
   preferredEol,
   setPreferences
 } from './preferences'
+import { registerSearch } from './search'
 import { defaultKeybindings, installShortcuts } from './shortcuts'
 import { notAvailable } from './stand-ins/notAvailable'
 import {
@@ -161,6 +162,9 @@ const runCommand = (id: string): boolean => {
         break
       case 'file.open-folder':
         void showOpenFolderDialog()
+        break
+      case 'file.quick-open':
+        emitToRenderer('mt::execute-command-by-id', 'file.quick-open')
         break
       case 'file.save':
         emitToRenderer('mt::editor-ask-file-save')
@@ -300,6 +304,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
+  registerSearch()
 
   onInvoke('mt::i18n::load', async(language: string) => {
     const load = translations[`../../desktop/static/locales/${language}.json`]
