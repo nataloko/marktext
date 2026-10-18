@@ -196,7 +196,32 @@ GitHub Actions: `.github/workflows/tauri-windows.yml` runs on pushes to
 `tauri-trial` that touch the trial, the desktop sources or the lockfile, and on
 demand. It runs the Rust tests, Clippy with warnings as errors, the type check,
 and builds the NSIS installer, uploaded as the `marktext-tauri-windows-x64`
-artifact of the run. Actions may need enabling once on the fork (Actions tab).
+artifact of the run, plus a debug installer (`-debug`, DevTools on
+Ctrl+Alt+I) for looking into Windows only problems.
+
+Windows results, 2026-10-18, in a Windows 11 VM (the user's own test, then
+mine): install, open a file, second launch opens a tab in the running app,
+title bar drag and double click to maximise, Edit menu cut, copy and paste,
+typing after closing a menu. Two Windows only fixes came out of it:
+- WebView2 refuses `document.execCommand('paste')`, so the Edit menu pastes
+  through the DevTools protocol (`Input.dispatchKeyEvent` with the `paste`
+  command, `main.rs run_editing_command`), Chromium's equivalent of
+  Electron's `webContents.paste()`; it keeps rich HTML paste.
+- Pressing a title bar element that cannot take focus, such as the ☰ button,
+  moved Chromium's page focus from the editor to `<body>`, and Muya ignores
+  keys and paste while it lacks focus (`muya.ts hasFocus`). Native focus
+  was fine (wry hands it back to WebView2), which is why Tauri's `setFocus`
+  and WebView2's `MoveFocus` did not help. `window.ts` now cancels the
+  default action of a mouse press on the title bar (not on text fields).
+  Found with the debug build's DevTools: `document.activeElement` was BODY.
+
+Testing in the local VM without an agent inside Windows:
+`packages/desktop-tauri/scripts/windows-vm.py` takes SPICE screenshots and
+sends QEMU mouse and keyboard events (UK layout). Copy the installer into
+the VM's shared folder (host `~/VMs/shared`, `Z:` in Windows), install with
+`Win+R`, `Z:\...\MarkText_0.22.0-dev_x64-setup.exe /S`, and start
+`%LOCALAPPDATA%\MarkText\marktext-tauri.exe`. A running instance catches
+launches of a new one (single instance), so close it before testing.
 
 ### Install JS dependencies
 
@@ -375,9 +400,8 @@ Review of steps 5 and 6 (reviewer agent, 2026-10-17) and what came of it:
   target's mode and retried on Windows sharing violations (`aa38507c`); links
   open as their target so their folder is watched; watch keys ignore case on
   Windows; a folder the OS refused is retried by the next file.
-- Open: the owner of a saved file is not kept (write-file-atomic chowns); on
-  Windows the Edit menu's `document.execCommand` paste is probably blocked
-  by WebView2; the window registry compares paths case sensitively on Windows.
+- Open: the owner of a saved file is not kept (write-file-atomic chowns); the
+  window registry compares paths case sensitively on Windows.
 - Done since: the file read and write commands are async (2026-10-18), so a
   slow drive no longer freezes every window's main thread.
 
