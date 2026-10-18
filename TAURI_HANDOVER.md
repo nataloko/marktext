@@ -633,6 +633,9 @@ from this menu and the ☰ menu alike: the page read the clipboard with
 `navigator.clipboard.readText`, which WebKitGTK refuses (NotAllowedError), and
 Muya swallows the error. `src-tauri/src/clipboard.rs` now reads it in Rust
 (GTK's clipboard on Linux, `clipboard-win` on Windows); checked on Xvfb.
+Checked in the Windows VM (a local MinGW build of `48cc0f1c`): the menu shows
+as a native menu with no WebView2 menu left, Cut, Paste and Paste as Plain
+Text work.
 Writing still uses `navigator.clipboard.writeText` (`mt::clipboard::write-text`)
 and may hit the same refusal; not checked.
 
