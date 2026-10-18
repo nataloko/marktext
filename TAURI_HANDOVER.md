@@ -473,8 +473,8 @@ Move To through the Windows save dialog; the Move to Trash question (Windows
 makes Move To Trash its default button, hence the trash for replaced files).
 Move to Trash on the VM's shared folder fails with "CanonicalizePath": the
 trash crate resolves the path first, which that drive (and Rust's
-`canonicalize`) cannot do; the file is left alone. The Recycle Bin on a local
-drive is untested, since test files stay in the shared folder. Because such
+`canonicalize`) cannot do; the file is left alone. On a local drive (a test
+folder in `%TEMP%`, removed afterwards) the item went to the Recycle Bin. Because such
 drives cannot resolve paths, the check against copying or moving a folder
 into itself now compares the paths as given first (`fileops.rs into_itself`).
 Not ported:
