@@ -696,6 +696,21 @@ then (the same in Electron). Keyboard layouts are not detected
 (`mt::keybinding-get-keyboard-info` answers nothing, so recording assumes a US
 layout).
 
+Image settings and copying images (2026-10-18): `src-tauri/src/user_data.rs`
+stands in for Electron's dataCenter: `dataCenter.json` in the app data folder
+(image folder, screenshot folder, uploader choice and script, image lists),
+plain JSON as in Electron (keytar is imported there but never used), kept out
+of preferences.json because its `reconcile` drops unknown keys. `src/userData.ts`
+answers `mt::ask-for-user-data`, `mt::set-user-data` (every window hears the
+change), the image folder picker and the image file picker. `fileops.rs` adds
+`mt::paths::is-image` and `mt::fs::copy-with-content-hash` (stream with SHA-1
+into a temporary file, then rename to `<sha1><ext>`). Checked on Xvfb: the
+Image page shows the stored folder, switching to "Copy to folder" and typing a
+new folder are saved, a pasted PNG (xclip) is written to that folder under its
+SHA-1 name, and an image inserted by path is copied there the same way. Neither
+displays: the page refuses `file://` addresses (section 7). Uploading is not
+ported yet.
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -783,7 +798,9 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Export to PDF/HTML, print | `src/main/menu/actions/file.ts` (`printToPDF`, `print`) |
 | Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`; a drop needs the path at once (Muya `dragDropImage.ts` calls `getPathForFile`), which only Linux can give, from `src-tauri/src/drop.rs` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
-| Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
+| Settings pages: fonts list, pandoc and command detection (`mt::cmd::exists`, needed for PicGo too) | `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
+| Image uploads (PicGo, a user's script): `mt::uploader::upload` returns nothing today, so "Upload to cloud" inserts an image with an `undefined` address | `src/main/ipc/uploader.ts` |
+| Local images in documents do not display: the page may not load `file://` addresses | Electron loads them directly |
 | Auto update | `electron-updater`; Tauri updater plugin |
 | Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
 

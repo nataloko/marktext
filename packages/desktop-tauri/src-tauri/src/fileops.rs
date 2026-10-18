@@ -5,13 +5,13 @@
 // mt::response-file-move-to). The page asks the user first where Electron
 // does (src/fileOps.ts).
 //
-// Not ported yet: copy-with-content-hash for pasted images, and stat, unlink
-// and empty-dir, which the renderer does not call.
+// Not ported yet: stat, unlink and empty-dir, which the renderer does not call.
 
-use std::io::{Error, ErrorKind};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use sha1::{Digest, Sha1};
 use tauri::{State, WebviewWindow};
 
 use crate::watch::FileWatcher;
@@ -243,6 +243,72 @@ async fn blocking<T: Send + 'static>(
     }
 }
 
+// common/filesystem/paths.ts IMAGE_EXTENSIONS.
+const IMAGE_EXTENSIONS: [&str; 6] = ["jpeg", "jpg", "png", "gif", "svg", "webp"];
+
+// common/filesystem/paths.ts isImageFile: an image extension on a file, not on
+// a link or a folder.
+#[tauri::command]
+pub fn paths_is_image(path: String) -> bool {
+    let ext = node_extname(&path).trim_start_matches('.').to_lowercase();
+    IMAGE_EXTENSIONS.contains(&ext.as_str()) && fs_is_file(path)
+}
+
+// Node's path.extname: from the last dot of the file name, but not for a name
+// that only starts with a dot.
+fn node_extname(path: &str) -> &str {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match name.rfind('.') {
+        Some(0) | None => "",
+        Some(_) if name == ".." => "",
+        Some(index) => &name[index..],
+    }
+}
+
+// main/filesystem copyFileWithContentHash: the source is hashed while it is
+// copied, and the copy is named after the hash. If that name is taken the
+// content is already there, so the new copy is dropped.
+fn copy_with_content_hash(src: &Path, output_dir: &Path) -> std::io::Result<PathBuf> {
+    let temp = output_dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let copied = (|| {
+        let mut input = std::fs::File::open(src)?;
+        let mut output = std::fs::File::create_new(&temp)?;
+        let mut hash = Sha1::new();
+        let mut buffer = vec![0; 64 * 1024];
+        loop {
+            let read = input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hash.update(&buffer[..read]);
+            output.write_all(&buffer[..read])?;
+        }
+        output.flush()?;
+        let name: String = hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+        let ext = node_extname(&src.to_string_lossy()).to_string();
+        Ok(output_dir.join(format!("{name}{ext}")))
+    })();
+    let result = copied.and_then(|dest| {
+        if dest.exists() {
+            std::fs::remove_file(&temp)?;
+        } else {
+            std::fs::rename(&temp, &dest)?;
+        }
+        Ok(dest)
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn fs_copy_with_content_hash(src: String, output_dir: String) -> Result<String, String> {
+    let (from, dir) = (PathBuf::from(&src), PathBuf::from(output_dir));
+    let dest = blocking(&src, move || copy_with_content_hash(&from, &dir)).await?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 fn trash(path: &Path) -> std::io::Result<()> {
     trash::delete(path).map_err(|err| Error::other(err.to_string()))
 }
@@ -348,5 +414,64 @@ mod tests {
         assert!(into_itself(&gone, &gone.join("gone")));
         assert!(!into_itself(&gone.join("a"), &gone.join("b")));
         assert!(!into_itself(&gone.join("a"), &gone.join("ab/a")));
+    }
+
+    #[test]
+    fn image_paths_need_an_image_extension_and_a_file() {
+        let dir = temp_dir("image");
+        for name in ["a.PNG", "b.jpeg", "c.txt", ".png", "d"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        std::fs::create_dir_all(dir.join("folder.png")).unwrap();
+        let is_image = |name: &str| paths_is_image(dir.join(name).to_string_lossy().into_owned());
+        assert!(is_image("a.PNG"));
+        assert!(is_image("b.jpeg"));
+        assert!(!is_image("c.txt"));
+        assert!(!is_image(".png"));
+        assert!(!is_image("d"));
+        assert!(!is_image("folder.png"));
+        assert!(!is_image("missing.png"));
+    }
+
+    #[test]
+    fn extname_follows_node() {
+        assert_eq!(node_extname("/a.b/c.tar.gz"), ".gz");
+        assert_eq!(node_extname("/a.b/c"), "");
+        assert_eq!(node_extname("/a/.hidden"), "");
+        assert_eq!(node_extname("c."), ".");
+        assert_eq!(node_extname("C:\\x\\p.PNG"), ".PNG");
+    }
+
+    #[test]
+    fn copies_are_named_by_content_and_not_repeated() {
+        let dir = temp_dir("hash");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(dir.join("one.png"), "abc").unwrap();
+        std::fs::write(dir.join("two.png"), "abc").unwrap();
+        std::fs::write(dir.join("other.PNG"), "abd").unwrap();
+
+        let first = copy_with_content_hash(&dir.join("one.png"), &out).unwrap();
+        // SHA-1 of "abc".
+        assert_eq!(first, out.join("a9993e364706816aba3e25717850c26c9cd0d89d.png"));
+        assert_eq!(std::fs::read(&first).unwrap(), b"abc");
+        let second = copy_with_content_hash(&dir.join("two.png"), &out).unwrap();
+        assert_eq!(second, first);
+        let third = copy_with_content_hash(&dir.join("other.PNG"), &out).unwrap();
+        assert_eq!(third.extension().unwrap(), "PNG");
+
+        let mut names: Vec<_> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name()).collect();
+        names.sort();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.iter().all(|name| !name.to_string_lossy().ends_with(".tmp")));
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_temp_file() {
+        let dir = temp_dir("hash-fail");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        assert!(copy_with_content_hash(&dir.join("missing.png"), &out).is_err());
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
     }
 }

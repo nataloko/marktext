@@ -19,6 +19,7 @@ mod keybindings;
 mod preferences;
 mod recent;
 mod search;
+mod user_data;
 mod watch;
 mod window_state;
 mod windows;
@@ -573,6 +574,10 @@ fn main() {
             quit_app,
             preferences::get_preferences,
             preferences::set_preferences,
+            user_data::get_user_data,
+            user_data::set_user_data,
+            fileops::paths_is_image,
+            fileops::fs_copy_with_content_hash,
             windows::window_add_file,
             windows::window_change_file,
             windows::window_remove_file,
@@ -625,6 +630,7 @@ fn main() {
             buffers::remove_temp_files(buffers.dir());
             let sessions = start_up(buffers.dir(), &preferences, &files, &mut folders);
             app.manage(preferences);
+            app.manage(user_data::UserData::load(user_data.join("dataCenter.json"), &user_data));
             app.manage(keybindings::Keybindings::new(user_data.join("keybindings.json")));
             app.manage(window_state::WindowStates::new(user_data.join("window-state.json")));
             app.manage(buffers);

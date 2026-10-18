@@ -51,6 +51,7 @@ import {
   userKeybindings
 } from './keybindings'
 import { installShortcuts } from './shortcuts'
+import { listenForUserData, registerUserData } from './userData'
 import {
   closeWindow,
   fullscreen,
@@ -269,7 +270,6 @@ const registerHandlers = (): void => {
   onSend('mt::ask-for-user-preference', () =>
     emitToRenderer('mt::user-preference', { ...forRenderer(preferences), titleBarStyle: 'custom' })
   )
-  onSend('mt::ask-for-user-data', () => emitToRenderer('mt::user-preference', {}))
   onSend('mt::get-current-language', () =>
     emitToRenderer('mt::current-language', preferences.language || 'en')
   )
@@ -335,6 +335,7 @@ const registerHandlers = (): void => {
   onInvoke('mt::clipboard::guess-file-path', () => '')
   onInvoke('mt::fs::path-exists', (p: string) => invoke('path_exists', { path: p }))
   registerFileOperations()
+  registerUserData()
   registerSearch()
   registerDrop()
 
@@ -440,6 +441,7 @@ const bootEditor = async(): Promise<void> => {
 export const startBackend = async(): Promise<void> => {
   registerHandlers()
   await listenForPreferences()
+  await listenForUserData()
   await loadPreferences()
   setWindowUrlParams()
   await installWindowEvents()
