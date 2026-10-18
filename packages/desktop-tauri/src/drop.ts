@@ -18,7 +18,7 @@ import { PANDOC_EXTENSIONS } from './stand-ins/main/config'
 import { notAvailable } from './stand-ins/notAvailable'
 
 interface WebView2Host {
-  postMessageWithAdditionalObjects?: (message: unknown, objects: FileList) => void
+  postMessageWithAdditionalObjects?: (message: string, objects: FileList) => void
 }
 
 declare global {
@@ -102,7 +102,8 @@ const postDrops = (): void => {
         resolvePending = resolve
         setTimeout(() => resolve([]), DROP_WAIT_MS)
       })
-      host.postMessageWithAdditionalObjects({ mtFileDrop: id }, files)
+      // A string, or Rust never sees it (src-tauri/src/drop.rs).
+      host.postMessageWithAdditionalObjects(`mt-file-drop:${id}`, files)
     },
     true
   )

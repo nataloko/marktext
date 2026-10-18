@@ -23,6 +23,8 @@ use crate::is_markdown;
 const DRAG_FILES_EVENT: &str = "mt::tauri::drag-files";
 #[cfg(windows)]
 const DROPPED_FILES_EVENT: &str = "mt::tauri::dropped-files";
+#[cfg(windows)]
+const DROP_MESSAGE: &str = "mt-file-drop:";
 
 pub(crate) fn attach(window: &WebviewWindow) {
     #[cfg(any(target_os = "linux", windows))]
@@ -73,9 +75,11 @@ fn watch_drops(window: &WebviewWindow) -> tauri::Result<()> {
     })
 }
 
-// The page posts `{"mtFileDrop": <id>}` with the dropped File objects. The
-// message is an object rather than a string, so wry's handler for Tauri's own
-// messages leaves it alone.
+// The page posts the string `mt-file-drop:<id>` with the dropped File objects.
+// It has to be a string: WebView2 calls wry's handler for Tauri's own messages
+// first, that handler fails on anything else, and a failing handler stops
+// WebView2 calling the ones after it. wry then hands the string to Tauri,
+// which cannot read it and logs an error in the page's console.
 #[cfg(windows)]
 fn watch_drops(window: &WebviewWindow) -> tauri::Result<()> {
     use tauri::Emitter;
@@ -109,12 +113,14 @@ fn watch_drops(window: &WebviewWindow) -> tauri::Result<()> {
         let target = window.clone();
         let handler = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
-            let mut json = PWSTR::null();
-            if args.WebMessageAsJson(&mut json).is_err() {
+            let mut message = PWSTR::null();
+            if args.TryGetWebMessageAsString(&mut message).is_err() {
                 return Ok(());
             }
-            let message: serde_json::Value = serde_json::from_str(&take_pwstr(json)).unwrap_or_default();
-            let Some(id) = message.get("mtFileDrop").and_then(|id| id.as_f64()) else { return Ok(()) };
+            let message = take_pwstr(message);
+            let Some(id) = message.strip_prefix(DROP_MESSAGE).and_then(|id| id.parse::<u64>().ok()) else {
+                return Ok(());
+            };
             let paths = dropped_paths(&args).unwrap_or_else(|err| {
                 eprintln!("[drop] {}: {err}", target.label());
                 Vec::new()

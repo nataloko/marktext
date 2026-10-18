@@ -275,6 +275,20 @@ The Windows check needs Fedora's `rust-std-static-x86_64-pc-windows-gnu`,
 `mingw64-binutils` and `mingw64-gcc` in the distrobox (installed on
 2026-10-18). The CI still builds the real MSVC installer.
 
+The same toolchain builds a Windows debug app that runs in the VM, which is
+much quicker than a CI round when trying a change:
+
+```bash
+pnpm --filter marktext-tauri build:web
+(cd packages/desktop-tauri/src-tauri && CARGO_TARGET_DIR=target/wincheck cargo tauri build --debug --no-bundle --target x86_64-pc-windows-gnu)
+# copy target/wincheck/x86_64-pc-windows-gnu/debug/{marktext-tauri.exe,WebView2Loader.dll}
+# into a folder in ~/VMs/shared/marktext-tauri-tests and run the exe there
+```
+
+It opens a console window that shows Rust's `eprintln!` output, and
+Ctrl+Alt+I opens the page's DevTools. Close any other MarkText first (single
+instance).
+
 The existing Rust code is not formatted with rustfmt defaults, so `cargo fmt`
 would reformat whole files; keep to the surrounding style instead.
 
@@ -554,7 +568,12 @@ during the hover without stopping WebKit, and sends the paths to the page,
 which takes the drop. Windows: WebView2 gives the page the files but no paths;
 the page posts the File objects with `chrome.webview.postMessageWithAdditionalObjects`
 and Rust reads each path from the message (`ICoreWebView2File::Path`), so the
-renderer's own overlay and `mt::window::drop` work as in Electron. Handling as
+renderer's own overlay and `mt::window::drop` work as in Electron. The message
+has to be a string (`mt-file-drop:<id>`): WebView2 calls wry's handler for
+Tauri's messages first, it fails on any other kind of message, and a failing
+handler stops WebView2 calling the ones after it (found in the VM with
+logging). wry passes the string on to Tauri, which prints a "JSON error" in
+the page's console for each drop; harmless. Handling as
 in Electron (`main/menu/actions/file.ts` mt::window::drop): markdown files
 open, a file pandoc converts gets the "not available" notice, folders and
 other files are ignored. Every window now also refuses to navigate away from
@@ -562,7 +581,10 @@ the app's own page, as Electron's `will-navigate` handler does. Checked on
 Xvfb with a GTK drag source (`packages/desktop-tauri/scripts/drag-source.py`,
 which uses the distrobox's python3-gobject): a markdown file and a folder onto the empty window, a
 markdown file and a .docx onto an open document (the editor no longer draws
-its drop marker for such a drag, and the document is left unchanged).
+its drop marker for such a drag, and the document is left unchanged). Checked
+in the Windows VM by dragging from Explorer: the "Import or Open" overlay, a
+markdown file onto it opens in a tab, a .docx gives the notice. As in
+Electron, only a drop on the overlay's box counts.
 
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
