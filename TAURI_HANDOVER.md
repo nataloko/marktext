@@ -443,7 +443,13 @@ no file content (Electron reads every file in the tree), links to folders
 inside the tree are not followed (that folder would need a second inotify
 watch), and globset lets `*` match a leading dot where minimatch does not.
 Not checked: picking a folder in the GTK dialog (it gets no keyboard focus on
-Xvfb), Windows. A reviewer pass found, and the commit fixes: a folder replaced
+Xvfb). Checked in the Windows VM with the CI installer (`0fbd0829`): a folder
+from the command line, live add, delete, rename and a case only rename made
+inside Windows, opening a file from the tree, a second launch with the same
+folder, and the Windows folder picker (Ctrl+Shift+O). The VM's shared folder
+(`Z:`) reports no changes made from the Linux side; changes made inside
+Windows show up, and with them anything the Linux side changed in the same
+folder. A reviewer pass found, and the commit fixes: a folder replaced
 under the same name lost its watch; links to a folder already shown shared one
 inotify watch; notify on Windows drops overflowing events without a word (a
 busy round now lists everything again); an older folder could win a race with
