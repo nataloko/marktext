@@ -42,8 +42,15 @@ import {
   setPreferences
 } from './preferences'
 import { registerSearch } from './search'
-import { defaultKeybindings, installShortcuts } from './shortcuts'
-import { notAvailable } from './stand-ins/notAvailable'
+import {
+  defaultKeybindings,
+  ensureKeybindingsFile,
+  keybindings,
+  saveUserKeybindings,
+  sendKeybindings,
+  userKeybindings
+} from './keybindings'
+import { installShortcuts } from './shortcuts'
 import {
   closeWindow,
   fullscreen,
@@ -53,8 +60,6 @@ import {
   quitApp,
   setFullscreen
 } from './window'
-
-const keybindings = defaultKeybindings(boot.platform)
 
 const translations = import.meta.glob('../../desktop/static/locales/*.json', { import: 'default' })
 
@@ -270,9 +275,7 @@ const registerHandlers = (): void => {
   )
   onSend('mt::set-user-preference', setPreferences)
   onSend('mt::cmd-toggle-autosave', () => setPreferences({ autoSave: !preferences.autoSave }))
-  onSend('mt::request-keybindings', () =>
-    emitToRenderer('mt::keybindings-response', Object.fromEntries(keybindings))
-  )
+  onSend('mt::request-keybindings', sendKeybindings)
 
   onSend('mt::cmd-open-file', showOpenDialog)
   onSend('mt::cmd-open-folder', () => showOpenFolderDialog())
@@ -346,17 +349,24 @@ const registerHandlers = (): void => {
     const directory = await openDialog({ directory: true })
     if (typeof directory === 'string') await setPreferences({ defaultDirectoryToOpen: directory })
   })
-  // The Keybindings page lists the defaults; saving custom ones is not ported
-  // yet. No keymap makes the page fall back to the US layout.
+  // No keymap makes the Keybindings page fall back to the US layout.
   onInvoke('mt::keybinding-get-keyboard-info', () => ({ layout: null, keymap: null }))
   onInvoke('mt::keybinding-get-pref-keybindings', () => ({
-    defaultKeybindings: new Map(keybindings),
-    userKeybindings: new Map()
+    defaultKeybindings: new Map(defaultKeybindings(boot.platform)),
+    userKeybindings: new Map(userKeybindings)
   }))
-  onInvoke('mt::keybinding-save-user-keybindings', () => {
-    notAvailable('Custom keyboard shortcuts')
-    return false
+  onInvoke('mt::keybinding-save-user-keybindings', saveUserKeybindings)
+  onSend('mt::open-keybindings-config', async() => {
+    try {
+      await openPath(await ensureKeybindingsFile())
+    } catch (err) {
+      console.error('[keybindings] could not open keybindings.json:', err)
+    }
   })
+  // There is no native keyboard layout to dump here.
+  onSend('mt::keybinding-debug-dump-keyboard-info', () =>
+    console.info('Keyboard layout information is not available in the Tauri build.')
+  )
   // Chromium's spellchecker dictionaries have no counterpart in the webviews;
   // empty answers keep the Spelling page from throwing.
   onInvoke('mt::spellchecker-get-available-dictionaries', () => [])

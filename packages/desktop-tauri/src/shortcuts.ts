@@ -2,11 +2,7 @@
 // key press into a command (packages/desktop/src/main/keyboard). Tauri has no
 // such layer, so this listens in the page and maps the same default tables.
 
-import linuxKeybindings from '../../desktop/src/main/keyboard/keybindingsLinux'
-import windowsKeybindings from '../../desktop/src/main/keyboard/keybindingsWindows'
-
-export const defaultKeybindings = (platform: string): Map<string, string> =>
-  platform === 'win32' ? windowsKeybindings : linuxKeybindings
+import { onKeybindingsChanged } from './keybindings'
 
 interface Accelerator {
   ctrl: boolean
@@ -54,9 +50,14 @@ export const installShortcuts = (
   keybindings: Map<string, string>,
   runCommand: (id: string) => boolean
 ): void => {
-  const table = [...keybindings]
-    .map(([id, accelerator]) => ({ id, accelerator: parseAccelerator(accelerator) }))
-    .filter((entry): entry is { id: string; accelerator: Accelerator } => !!entry.accelerator)
+  let table: { id: string; accelerator: Accelerator }[] = []
+  const rebuild = (): void => {
+    table = [...keybindings]
+      .map(([id, accelerator]) => ({ id, accelerator: parseAccelerator(accelerator) }))
+      .filter((entry): entry is { id: string; accelerator: Accelerator } => !!entry.accelerator)
+  }
+  rebuild()
+  onKeybindingsChanged(rebuild)
 
   window.addEventListener(
     'keydown',

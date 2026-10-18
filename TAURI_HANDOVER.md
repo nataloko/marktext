@@ -678,6 +678,24 @@ replaces the primary selection before the paste reads it, which `xsel`
 (installed in the distrobox) can test. A first attempt that blamed Muya's
 cancelled copy did not help. Worth reporting to WebKit.
 
+Custom keyboard shortcuts (2026-10-18): `src-tauri/src/keybindings.rs` keeps
+`keybindings.json` in the app data folder (Electron's format: command id to
+accelerator, '' for unbound) and tells every window when it is saved;
+`src/keybindings.ts` merges it with the platform defaults by Electron's rules
+(`shortcutHandler.ts _loadLocalKeybindings`, ported as a pure function) into
+one shared table that the shortcuts, the ☰ menu's labels and the command
+palette use, so a save from the Keybindings page applies at once in every open
+window, as in Electron. The page's file button opens `keybindings.json` in the
+default app. Its accelerator checks (`@hfelix/electron-localshortcut`,
+`common/keybinding`) read `process` as they load, so they are loaded after the
+preload. Checked on Xvfb: a binding from the file at start, a change saved in
+Settings taking effect in an editor window that stayed open, and the palette
+label following it. Note when testing: Muya's format toolbar has its own Ctrl+B,
+Ctrl+I and so on while text is selected, so unbinding Bold does not stop Ctrl+B
+then (the same in Electron). Keyboard layouts are not detected
+(`mt::keybinding-get-keyboard-info` answers nothing, so recording assumes a US
+layout).
+
 Upstream renderer bug seen in passing: the command palette's Change Theme list
 shows ids ("window.change-theme-light") instead of names, because
 `getCommandsWithDescriptions` (`renderer/src/commands/index.ts:724`) sets the
@@ -766,7 +784,6 @@ port. Unhandled channels are logged in debug builds (section 3).
 | Images: paste, drop, insert from file | `mt::fs::copy-with-content-hash`, `mt::clipboard::*`; a drop needs the path at once (Muya `dragDropImage.ts` calls `getPathForFile`), which only Linux can give, from `src-tauri/src/drop.rs` |
 | Missing CLI files as named empty documents | `src/main/filesystem/markdown.ts loadCliMarkdownFile` |
 | Settings pages: user data for the Image page (image folder, uploaders), fonts list, pandoc and command detection | `src/main/dataCenter/`, `src/main/ipc/fonts.ts`, `src/main/ipc/cmd.ts` |
-| User keybindings (`keybindings.json`): save from the Keybindings page, apply to shortcuts and menu | `src/main/keyboard/shortcutHandler.ts`, `src/main/app/index.ts` mt::keybinding-* |
 | Auto update | `electron-updater`; Tauri updater plugin |
 | Link titles on URL paste, PlantUML, uploads, fonts list | `mt::link::fetch-html`, `mt::diagram::fetch-plantuml`, `mt::uploader::upload`, `mt::fonts::list` |
 

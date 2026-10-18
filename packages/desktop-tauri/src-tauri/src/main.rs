@@ -15,6 +15,7 @@ mod drop;
 mod encoding;
 mod fileops;
 mod folders;
+mod keybindings;
 mod preferences;
 mod recent;
 mod search;
@@ -586,7 +587,10 @@ fn main() {
             buffers::abandon_buffer,
             windows::close_cancelled,
             search::search_start,
-            search::search_cancel
+            search::search_cancel,
+            keybindings::read_user_keybindings,
+            keybindings::write_user_keybindings,
+            keybindings::ensure_keybindings_file
         ])
         .manage(windows::Windows::default())
         .manage(folders::Folders::default())
@@ -621,6 +625,7 @@ fn main() {
             buffers::remove_temp_files(buffers.dir());
             let sessions = start_up(buffers.dir(), &preferences, &files, &mut folders);
             app.manage(preferences);
+            app.manage(keybindings::Keybindings::new(user_data.join("keybindings.json")));
             app.manage(window_state::WindowStates::new(user_data.join("window-state.json")));
             app.manage(buffers);
             app.manage(recent::RecentFiles::load(user_data.join("recently-used-documents.json")));

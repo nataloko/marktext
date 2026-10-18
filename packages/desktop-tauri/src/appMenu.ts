@@ -29,7 +29,7 @@ import { appWindow, boot } from './boot'
 import { emitToRenderer, ipcMain, onSend } from './electron'
 import { showPopup, type ItemOptions } from './menu'
 import { preferences, setPreferences } from './preferences'
-import { defaultKeybindings } from './shortcuts'
+import { keybindings as keybindingTable } from './keybindings'
 import { alwaysOnTop, fullscreen, setFullscreen, toggleAlwaysOnTop } from './window'
 
 // What the menu actions receive as Electron's BrowserWindow.
@@ -60,7 +60,6 @@ const menuWindow: MenuWindow = {
   close: () => emitToRenderer('mt::ask-for-close')
 }
 
-const keybindingTable = defaultKeybindings(boot.platform)
 const keybindings = {
   getAccelerator: (id: string) => keybindingTable.get(id) || null
 } as unknown as Keybindings
