@@ -985,6 +985,7 @@
       "rows": "Строки",
       "columns": "Столбцы"
     },
+    "loadingDocument": "Загрузка документа",
     "mediaViewer": {
       "title": "Просмотр",
       "close": "Закрыть",

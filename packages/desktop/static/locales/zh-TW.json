@@ -985,6 +985,7 @@
       "rows": "列",
       "columns": "欄"
     },
+    "loadingDocument": "正在載入文件",
     "mediaViewer": {
       "title": "預覽",
       "close": "關閉",

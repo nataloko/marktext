@@ -985,6 +985,7 @@
       "rows": "Zeilen",
       "columns": "Spalten"
     },
+    "loadingDocument": "Dokument wird geladen",
     "mediaViewer": {
       "title": "Vorschau",
       "close": "Schließen",

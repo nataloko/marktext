@@ -985,6 +985,7 @@
       "rows": "Linhas",
       "columns": "Colunas"
     },
+    "loadingDocument": "Carregando documento",
     "mediaViewer": {
       "title": "Pré-visualização",
       "close": "Fechar",

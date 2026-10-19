@@ -985,6 +985,7 @@
       "rows": "Rows",
       "columns": "Columns"
     },
+    "loadingDocument": "Loading document",
     "mediaViewer": {
       "title": "Preview",
       "close": "Close",

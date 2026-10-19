@@ -985,6 +985,7 @@
       "rows": "行",
       "columns": "列"
     },
+    "loadingDocument": "ドキュメントを読み込み中",
     "mediaViewer": {
       "title": "プレビュー",
       "close": "閉じる",

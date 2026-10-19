@@ -8,6 +8,20 @@
       ref="editorRef"
       class="editor-component"
     />
+    <div
+      v-if="mountProgress !== null"
+      class="mount-progress"
+      role="progressbar"
+      :aria-label="t('editor.loadingDocument')"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      :aria-valuenow="Math.round(mountProgress * 100)"
+    >
+      <div
+        class="mount-progress-bar"
+        :style="{ transform: `scaleX(${mountProgress})` }"
+      />
+    </div>
     <media-viewer
       ref="mediaViewer"
       @open-change="viewerOpen = $event"
@@ -263,6 +277,10 @@ const tableChecker = reactive({
 const editorRef = ref<HTMLDivElement | null>(null)
 const mediaViewer = ref<InstanceType<typeof MediaViewer> | null>(null)
 const viewerOpen = ref(false)
+// Share of a large document's blocks the engine has built, null when none is
+// being built. It builds the first screen at once and the rest in the
+// background, which takes a while for very large files.
+const mountProgress = ref<number | null>(null)
 const rowInput = ref<InputNumberInstance | null>(null)
 
 // Non-reactive variables
@@ -1909,6 +1927,16 @@ onMounted(() => {
   // derived document snapshot (markdown / word count / cursor / history / TOC /
   // block AST), so we compute it here — mirroring the legacy engine's
   // `dispatchChange` payload.
+  editor.value.on('muya-mount-progress', ({ mounted, total }: { mounted: number; total: number }) => {
+    mountProgress.value = mounted / total
+  })
+  editor.value.on('muya-mount-complete', () => {
+    mountProgress.value = null
+  })
+  editor.value.on('muya-mount-canceled', () => {
+    mountProgress.value = null
+  })
+
   editor.value.on('json-change', () => {
     // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
     // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
@@ -2146,6 +2174,35 @@ onBeforeUnmount(() => {
    float tools would keep re-triggering under the open viewer (#4731 again). */
 .editor-wrapper.viewer-open .editor-component {
   pointer-events: none;
+}
+
+/* Shown only for loads that last, so smaller files never flash it. */
+.mount-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 1;
+  pointer-events: none;
+  animation: mount-progress-in 0.2s 0.4s both;
+}
+
+.mount-progress-bar {
+  height: 100%;
+  background: var(--themeColor);
+  transform-origin: left;
+  transition: transform 0.2s linear;
+}
+
+[dir='rtl'] .mount-progress-bar {
+  transform-origin: right;
+}
+
+@keyframes mount-progress-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .editor-component {

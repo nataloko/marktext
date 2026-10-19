@@ -985,6 +985,7 @@
       "rows": "행",
       "columns": "열"
     },
+    "loadingDocument": "문서를 불러오는 중",
     "mediaViewer": {
       "title": "미리 보기",
       "close": "닫기",

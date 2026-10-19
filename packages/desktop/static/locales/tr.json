@@ -985,6 +985,7 @@
       "rows": "Satırlar",
       "columns": "Sütunlar"
     },
+    "loadingDocument": "Belge yükleniyor",
     "mediaViewer": {
       "title": "Önizleme",
       "close": "Kapat",

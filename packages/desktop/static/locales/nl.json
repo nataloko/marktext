@@ -985,6 +985,7 @@
       "rows": "Rijen",
       "columns": "Kolommen"
     },
+    "loadingDocument": "Document laden",
     "mediaViewer": {
       "title": "Voorbeeld",
       "close": "Sluiten",

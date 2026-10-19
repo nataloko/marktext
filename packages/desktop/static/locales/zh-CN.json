@@ -980,6 +980,7 @@
       "rows": "行",
       "columns": "列"
     },
+    "loadingDocument": "正在加载文档",
     "mediaViewer": {
       "title": "预览",
       "close": "关闭",
