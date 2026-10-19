@@ -109,6 +109,7 @@ This branch (`tauri-trial`) runs MarkText on [Tauri](https://tauri.app) instead 
 - **Spell checking:** not available yet.
 - **Pandoc import and export:** not tested on Windows yet. Needs [pandoc](https://pandoc.org) installed.
 - **Automatic updates:** not available.
+- **Very large documents:** the start of the file shows within about two seconds, and a bar at the top of the editor shows the rest loading, which takes about 45 s for a 1.4 MB file on Linux. Typing lags in files of about 1 MB and up. This is a limit of MarkText's editor and is more marked on Linux. Documents of ordinary size are not affected.
 
 <h2 align="center">Sponsors</h2>
 
