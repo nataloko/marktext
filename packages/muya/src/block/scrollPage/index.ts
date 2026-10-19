@@ -96,8 +96,12 @@ export class ScrollPage extends Parent {
     // The chunk budget bounds the JS append work only — the browser still
     // styles/lays out each appended chunk after the task, so the observed
     // event-loop gap can be larger than the budget.
+    // Each chunk also costs a rendering pass that grows with the document,
+    // so small chunks multiply the total: a 1.4 MB file took 52 s in
+    // Chromium and 119 s in WebKitGTK to finish with 4 ms chunks, and
+    // 12.5 s and 44 s with 50 ms ones, about what one synchronous mount takes.
     private static readonly _initialMountWeight = 512;
-    private static readonly _chunkBudgetMs = 4;
+    private static readonly _chunkBudgetMs = 50;
 
     private _pendingMount: {
         handle: ReturnType<typeof setTimeout> | null;
