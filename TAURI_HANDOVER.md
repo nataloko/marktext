@@ -961,6 +961,45 @@ The Electron build is an older release than this repo (0.22.0-dev). Both ran on
 Xvfb without a GPU. **Re-measure on the desktop machine**, ideally against the
 Electron build of this same branch.
 
+### Large documents
+
+Measured with a generated 1.4 MB file (400 chapters of headings, lists, task
+lists, tables, code, math and Mermaid) and shorter cuts of it, in Muya's test
+page (`packages/muya/e2e`) on the system WebKitGTK 2.54 under Xvfb and in
+Playwright's Chromium.
+
+- Opening was slow for three reasons: Muya cloned the whole document once per
+  block while collecting link definitions (upstream PR #4942); the footnote
+  rule's lookbehind regex, which JavaScriptCore interprets instead of compiling,
+  ran over the rest of the file for every paragraph (WebKit only, fixed in
+  `26631c21`); and WebKitGTK takes about 40 s to lay out and paint the full
+  document the first time, against about 11 s in Chromium.
+- Branch `tauri-perf-trial` (local) has #4942 and #4946 (progressive mounting)
+  picked from upstream, the footnote fix, 50 ms mounting steps and a loading
+  bar at the top of the editor. It waits for upstream to merge #4942 and #4946.
+
+Opening the 1.4 MB file in WebKitGTK:
+
+| | Window frozen | Fully loaded |
+|---|---|---|
+| Before any fix | about 150 s | about 150 s |
+| #4942 and footnote fix, all at once | 50 s | 50 s |
+| plus #4946, its 4 ms steps | 1.6 s, then stalls up to 2 s | 119 s |
+| plus 50 ms steps (the branch) | 1.7 s, then stalls up to 2 s | 44 s |
+
+In Chromium (WebView2 on Windows) the same steps give 15.5 s all at once,
+52 s with 4 ms steps and 12.5 s with 50 ms steps, the first screen after 1.1 s.
+Each step costs a rendering pass that grows with the document, so small steps
+multiply the total.
+
+- Typing lag grows with file size, in both engines: about 16 ms per key up to
+  170 KB, 40 to 55 ms at 700 KB and 80 to 100 ms at 1.4 MB in WebKitGTK. A
+  copy of the page as plain contenteditable HTML, without Muya, lags the same,
+  so it is the browser editing one very large editable element, not Muya's code.
+- Tried and dropped: `content-visibility: auto` on the top-level blocks. It
+  loads the 1.4 MB file in 8 s in Chromium, but in WebKitGTK typing goes from
+  96 ms to about 1.4 s per key.
+
 ### Muya's browser tests on WebKit
 
 Muya's Playwright suite (`packages/muya/e2e`) run on Chromium and WebKit:
