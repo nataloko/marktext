@@ -974,9 +974,10 @@ Playwright's Chromium.
   ran over the rest of the file for every paragraph (WebKit only, fixed in
   `26631c21`); and WebKitGTK takes about 40 s to lay out and paint the full
   document the first time, against about 11 s in Chromium.
-- Branch `tauri-perf-trial` (local) has #4942 and #4946 (progressive mounting)
-  picked from upstream, the footnote fix, 50 ms mounting steps and a loading
-  bar at the top of the editor. It waits for upstream to merge #4942 and #4946.
+- `tauri-trial` has #4942 and #4946 (progressive mounting) picked from
+  upstream before they were merged there, the footnote fix, 50 ms mounting
+  steps and a loading bar at the top of the editor. When upstream merges its
+  versions, expect conflicts in `packages/muya` on the next merge from `develop`.
 
 Opening the 1.4 MB file in WebKitGTK:
 
