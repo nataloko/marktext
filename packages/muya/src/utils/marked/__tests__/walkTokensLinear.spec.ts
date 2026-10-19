@@ -78,9 +78,9 @@ describe('linear token walk', () => {
             '> # quoted heading\n\n- item\n\n  ```js\n  x\n  ```\n',
             {
                 footnote: false,
-                isGitlabCompatibilityEnabled: true,
+                texMathGfm: true,
                 frontMatter: false,
-                math: false,
+                texMathDollars: false,
             },
         );
         const json = JSON.stringify(tokens);

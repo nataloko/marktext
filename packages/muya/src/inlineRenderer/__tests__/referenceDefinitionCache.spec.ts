@@ -28,8 +28,7 @@ function makeRenderer(blocks: TState[]) {
 
 function collect(renderer: InlineRenderer) {
     // Exercise the cache directly so token rendering does not obscure state reads.
-    // @ts-expect-error -- intentional coverage of the private collection boundary.
-    renderer._collectReferenceDefinitions();
+    renderer.collectReferenceDefinitions();
 }
 
 afterEach(() => vi.restoreAllMocks());
