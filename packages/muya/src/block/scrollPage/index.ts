@@ -153,10 +153,16 @@ export class ScrollPage extends Parent {
     updateState(state: TState[]) {
         // A resize owns references into the old tree and cannot survive a rebuild (#5394).
         this.muya.eventCenter.emit('muya-transformer', { reference: null });
+        const wasMounting = this._pendingMount !== null;
         this.cancelPendingMount();
         // Empty scrollPage dom
         this.empty();
         this._mountBlocks(state);
+        // A document that fits the first mount sends neither progress nor
+        // completion, so say the dropped mount is over. Last, as a listener
+        // may replace the document again.
+        if (wasMounting && !this._pendingMount)
+            this.muya.eventCenter.emit('muya-mount-canceled');
     }
 
     // Building every block's DOM subtree up front is the dominant open cost on

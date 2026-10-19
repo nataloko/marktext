@@ -276,6 +276,28 @@ describe('progressive mount isolation and lifecycle', () => {
         expect(muya.editor.scrollPage!.children.length).toBe(1);
     });
 
+    it('reports a dropped mount once the replacement is fully mounted', () => {
+        const muya = boot();
+        const canceled = vi.fn(() => expect(muya.getMarkdown().trim()).toBe('short'));
+        muya.on('muya-mount-canceled', canceled);
+        muya.setContent('short');
+        expect(canceled).toHaveBeenCalledTimes(1);
+        muya.setContent('again');
+        expect(canceled).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not report a dropped mount that the replacement mount follows', () => {
+        const muya = boot();
+        const canceled = vi.fn();
+        const complete = vi.fn();
+        muya.on('muya-mount-canceled', canceled);
+        muya.on('muya-mount-complete', complete);
+        muya.setContent(paragraphs(700));
+        vi.runAllTimers();
+        expect(canceled).not.toHaveBeenCalled();
+        expect(complete).toHaveBeenCalledExactlyOnceWith({ total: 700 });
+    });
+
     it('counts deeply nested state without recursion and stops at its budget', () => {
         let node: TState = { name: 'paragraph', text: 'deep' };
         for (let i = 0; i < 10000; i++)
