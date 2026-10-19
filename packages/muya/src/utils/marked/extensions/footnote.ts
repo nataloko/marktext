@@ -15,9 +15,13 @@ interface IFootnoteRendererThis {
 // Block-level rule for footnote definitions, applied at the start of the
 // marked tokenizer's remaining source rather than against a per-line buffer.
 //
-// The `(?<!\\)` lookbehind in front of the closing `]` lets users escape
-// the bracket — `[^foo\]: bar` stays a paragraph instead of becoming a
-// footnote with identifier `foo\`. The `:[\s\S]*?` after the marker uses
+// The identifier may not end in a backslash, which lets users escape the
+// closing bracket — `[^foo\]: bar` stays a paragraph instead of becoming a
+// footnote with identifier `foo\`. That is spelled out as "last character not
+// `\`" rather than with a `(?<!\\)` lookbehind: WebKit's regex compiler does
+// not compile lookbehinds, and the interpreted search in `start()` below,
+// which marked runs over the rest of the document for every paragraph, made
+// opening a large document quadratic there. The `:[\s\S]*?` after the marker uses
 // `*` (not `+`) so a bare `[^id]:` followed only by a newline is still
 // recognised as an empty footnote.
 //
@@ -26,7 +30,9 @@ interface IFootnoteRendererThis {
 // definitions packed one per line — the shape pandoc and GFM both emit —
 // as siblings. Indented (4-space) definitions stay body text, matching
 // the continuation rule.
-const BLOCK_RULE = /^\[\^([^^[\]\s]+)(?<!\\)\]:([\s\S]*?)(?=\n *\n {0,3}[^ ]|\n\[\^[^^[\]\s]+(?<!\\)\]:|$)/;
+const IDENTIFIER = String.raw`[^^[\]\s]*[^^[\]\s\\]`;
+const BLOCK_RULE = new RegExp(String.raw`^\[\^(${IDENTIFIER})\]:([\s\S]*?)(?=\n *\n {0,3}[^ ]|\n\[\^${IDENTIFIER}\]:|$)`);
+const START_RULE = new RegExp(String.raw`\n\[\^${IDENTIFIER}\]:`);
 
 // Inline `[^id]` reference. Tokenising it here rather than regexing marked's
 // finished HTML is what makes `\[^id]` stay literal: marked's own escape rule
@@ -71,7 +77,7 @@ export default function footnoteExtension(): MarkedExtension {
                     // newline inside that slice — never when the slice merely
                     // begins with `[^`, because that would split paragraphs
                     // at inline footnote references like `Lorem [^1] ipsum`.
-                    const m = /\n\[\^[^^[\]\s]+(?<!\\)\]:/.exec(src);
+                    const m = START_RULE.exec(src);
                     return m ? m.index + 1 : undefined;
                 },
                 tokenizer(src: string): IFootnoteToken | undefined {

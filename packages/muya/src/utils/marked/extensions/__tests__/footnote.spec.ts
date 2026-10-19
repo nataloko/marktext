@@ -148,15 +148,21 @@ At vero eos [^foo1]: et accusam.`);
     });
 
     it('backslash-escaped closing bracket is not a footnote (marktext 1ecc3601 fix)', () => {
-        // The `(?<!\\)` lookbehind in BLOCK_RULE is what stops `[^1\]: foo`
-        // from being parsed as a footnote definition. Without the lookbehind
-        // the identifier would become `1\` and the definition would consume
-        // the rest of the line — exactly the regression marktext fixed.
+        // BLOCK_RULE's identifier may not end in a backslash, which is what
+        // stops `[^1\]: foo` from being parsed as a footnote definition.
+        // Otherwise the identifier would become `1\` and the definition would
+        // consume the rest of the line — exactly the regression marktext fixed.
         const tokens = parse(`foo[^1]
 
 [^1\\]: foo`);
         const types = tokens.map(t => t.type);
         expect(types).not.toContain('footnote');
+    });
+
+    it('a definition line ends the paragraph above it, an escaped one does not', () => {
+        // The extension's start() search finds where a paragraph stops.
+        expect(parse('text\n[^1]: note').map(t => t.type)).toEqual(['paragraph', 'footnote']);
+        expect(parse('text\n[^1\\]: note').map(t => t.type)).toEqual(['paragraph']);
     });
 
     it('bracket with space before caret is not a footnote', () => {
